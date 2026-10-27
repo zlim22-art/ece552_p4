@@ -248,8 +248,6 @@ module hart #(
         .if_valid(if_valid),
         .id_pc(id_pc),
         .id_inst(id_inst),
-        .id_rs1_addr(id_rs1_addr),
-        .id_rs2_addr(id_rs2_addr),
         .id_valid(id_valid)
     );
 
@@ -535,26 +533,26 @@ module hart #(
     wire uses_rs1 = id_valid && (is_rtype || is_itype_alu || is_load || is_store || is_branch || is_jalr);
     wire uses_rs2 = id_valid && (is_rtype || is_store || is_branch);
 
-    assign o_retire_valid     = !i_rst;
+    assign o_retire_valid     = wb_valid;
     //Changed from instruction to wb_inst after passing through all pipes
     assign o_retire_inst      = wb_inst;
     // TODO: do we pass through iligal isncutions all the way torugh or do we isnert noop? ALex-> I think it should be like we pass it all the way through
-    assign o_retire_trap      = illegal_instruction || memory_misaligned;
-    assign o_retire_halt      = !i_rst && is_ebreak;
+    assign o_retire_trap      = wb_trap;
+    assign o_retire_halt      = wb_halt;
     //TODO: Change from instruction[19:15] to wb_rs1_addr and instruction[24:20] to wb_rs2_addr after passing through the fetch pipe
-    assign o_retire_rs1_raddr = uses_rs1 ? wb_rs1_addr : 5'd0;
-    assign o_retire_rs2_raddr = uses_rs2 ? wb_rs2_addr : 5'd0;
+    assign o_retire_rs1_raddr = wb_uses_rs1 ? wb_rs1_addr : 5'd0;
+    assign o_retire_rs2_raddr = wb_uses_rs2 ? wb_rs2_addr : 5'd0;
     //Changed rs1_data and rs2_data to ex_reg_data_1 and ex_reg_data_2 after passing through all pipes
     assign o_retire_rs1_rdata = wb_reg_data_1;
     assign o_retire_rs2_rdata = wb_reg_data_2;
 
-    wire reg_write_allowed = rd_wen && !o_retire_trap && !i_rst;
+    wire reg_write_allowed = wb_regwrite;
     //TODO: Change from rd_waddr to wb_write_dad_addrs after passing through the mem pipe
     assign o_retire_rd_waddr  = reg_write_allowed ? wb_write_dad_addrs : 5'd0;
 
     assign o_retire_rd_wdata  = wb_data_out;
-    assign o_retire_pc        = pc;
-    assign o_retire_next_pc   = next_pc;
+    assign o_retire_pc        = wb_mem_pc;
+    assign o_retire_next_pc   = wb_pc_rslt;
 
 endmodule
 

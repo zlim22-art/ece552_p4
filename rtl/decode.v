@@ -58,14 +58,20 @@ module decode (
     rf rf_inst (
         .i_clk (clk),
         .i_rst (~rst_n),
-        .i_rs1_raddr (instruction[19:15]), 
-        .i_rs2_raddr (instruction[24:20]), 
+        .i_rs1_raddr (rs1_addr), 
+        .i_rs2_raddr (rs2_addr), 
         .i_rd_waddr (write_dad_addrs),    
         .i_rd_wdata (wb_load_rslt),       
         .i_rd_wen (wb_write_enable),    
         .o_rs1_rdata (rs1_data), 
         .o_rs2_rdata (rs2_data)  
     );
+
+    wire [4:0] rs1_addr;
+    wire [4:0] rs2_addr;
+
+    assign rs1_addr = instruction[19:15];
+    assign rs2_addr = instruction[24:20];
     
     assign is_ebreak = (instruction == 32'h00100073);
     
