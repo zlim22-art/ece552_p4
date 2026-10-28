@@ -538,33 +538,29 @@ module hart #(
         (mem_inst_word[11:7] != 5'd0);
     
     hazard_ctrl hazard_ctrl_inst (
-        .clk(i_clk),
-        .rs1_addr(id_inst[19:15]),
-        .rs2_addr(id_inst[24:20]),
-        .is_load(is_load),
-        .is_store(is_store),
-        .ex_is_load(ex_is_load),
-        .ex_is_store(ex_is_store),
-        .mem_is_load(mem_is_load),
-        .mem_is_store(mem_is_store),
-        .id_flags(id_flags),
-        .id_ex_flgs(ex_flag),
-        .ex_mem_flgs(6'd0),
-        .mem_wb_flgs(6'd0),
-        .ebreak_triggered(is_ebreak),
+        .id_valid(id_valid),
+        .id_inst(id_inst),
+
+        .ex_regwrite(ex_regwrite),
         .ex_rd_addr(ex_inst[11:7]),
+
+        .mem_regwrite(mem_regwrite),
         .mem_rd_addr(mem_inst_word[11:7]),
+
+        .wb_regwrite(wb_regwrite),
         .wb_rd_addr(wb_rd_addr),
+
         .ex_redirect(ex_redirect),
-        .stall_ex_mem(stall_ex_mem),
-        .stall_id_ex(stall_id_ex),
+
         .stall_if_id(stall_if_id),
+        .stall_id_ex(stall_id_ex),
+        .stall_ex_mem(stall_ex_mem),
         .stall_mem_wb(stall_mem_wb),
-        .clear_ex_mem(clear_ex_mem),
-        .clear_id_ex(clear_id_ex),
+
         .clear_if_id(clear_if_id),
-        .clear_mem_wb(clear_mem_wb),
-        .o_trap(hazard_trap)
+        .clear_id_ex(clear_id_ex),
+        .clear_ex_mem(clear_ex_mem),
+        .clear_mem_wb(clear_mem_wb)
     );
 
     // the old write back shnegengais
@@ -584,16 +580,16 @@ module hart #(
         (wb_rd_addr != 5'd0);
 
     assign ex_regwrite =
-        wb_valid &&
-        !ex_invalid_instruction &&
-        (ex_is_rtype ||
-        ex_is_itype ||
-        ex_is_load ||
-        ex_is_lui ||
-        ex_is_auipc ||
-        ex_is_jal ||
-        ex_is_jalr) &&
-        (ex_inst[11:7] != 5'd0);
+    ex_valid &&
+    !ex_invalid_instruction &&
+    (ex_is_rtype ||
+     ex_is_itype ||
+     ex_is_load ||
+     ex_is_lui ||
+     ex_is_auipc ||
+     ex_is_jal ||
+     ex_is_jalr) &&
+    (ex_inst[11:7] != 5'd0);
 
     wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
     wire wb_uses_rs2 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011);
@@ -601,7 +597,7 @@ module hart #(
     assign o_retire_valid = wb_valid;
     assign o_retire_inst = wb_inst;
     assign o_retire_trap = wb_trap;
-    assign o_retire_halt = wb_is_ebreak;
+    assign o_retire_halt = wb_valid && wb_is_ebreak;
     assign o_retire_rs1_raddr = wb_uses_rs1 ? wb_rs1_addr : 5'd0;
     assign o_retire_rs2_raddr = wb_uses_rs2 ? wb_rs2_addr : 5'd0;
     assign o_retire_rs1_rdata = wb_rs1_data;

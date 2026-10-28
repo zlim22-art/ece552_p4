@@ -147,7 +147,6 @@ module id_ex_pipeline(
     end
 
     assign ex_pc = (stall) ? 32'b0 : int_ex_pc;
-    assign ex_inst = (stall) ? 32'b0 : int_ex_inst;
     assign ex_imm = (stall) ? 32'b0 : int_ex_imm;
     assign ex_rs1_data = (stall) ? 32'b0 : int_ex_rs1_data;
     assign ex_rs2_data = (stall) ? 32'b0 : int_ex_rs2_data;
@@ -165,7 +164,8 @@ module id_ex_pipeline(
     assign ex_i_arith = (stall) ? 1'b0  : int_ex_i_arith;
     assign ex_i_unsigned = (stall) ? 1'b0  : int_ex_i_unsigned;
     assign ex_op_sell = (stall) ? 3'b0  : int_ex_op_sell;
-    assign ex_valid = (stall) ? 1'b0  : int_ex_valid;
+    assign ex_valid = int_ex_valid;
+    assign ex_inst  = int_ex_inst;
     assign ex_is_ebreak = (stall) ? 1'b0  : int_ex_is_ebreak;
     assign ex_invalid_instruction = (stall) ? 1'b0  : int_ex_invalid_instruction;
 
