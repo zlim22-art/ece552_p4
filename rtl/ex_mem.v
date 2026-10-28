@@ -21,6 +21,7 @@ module ex_mem_pipeline(
     input wire ex_valid,
     input wire ex_is_ebreak,
     input wire ex_invalid_instruction,
+    input wire [5:0] ex_flag,          
     input wire flush,
     input wire stall,
     input wire [31:0] ex_next_pc,    
@@ -46,7 +47,8 @@ module ex_mem_pipeline(
     output wire mem_is_ebreak,
     output wire mem_invalid_instruction,
     output wire [31:0] mem_next_pc,
-    output wire [10:0] mem_inst_vector
+    output wire [10:0] mem_inst_vector,
+    output wire [5:0] mem_flag        
 );
     reg [31:0] int_mem_pc;
     reg [31:0] int_mem_inst;
@@ -70,6 +72,7 @@ module ex_mem_pipeline(
     reg int_mem_invalid_instruction;
     reg [31:0] int_mem_next_pc;
     reg [10:0] int_mem_inst_vector;
+    reg [5:0] int_mem_flag;           
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -95,6 +98,7 @@ module ex_mem_pipeline(
             int_mem_invalid_instruction <= 1'b0;
             int_mem_next_pc <= 32'b0;
             int_mem_inst_vector <= 11'b0;
+            int_mem_flag <= 6'b0;
         end
         else if (flush) begin
             int_mem_pc <= 32'b0;
@@ -119,6 +123,7 @@ module ex_mem_pipeline(
             int_mem_invalid_instruction <= 1'b0;
             int_mem_next_pc <= 32'b0;
             int_mem_inst_vector <= 11'b0;
+            int_mem_flag <= 6'b0;
         end
         else if (!stall) begin
             int_mem_pc <= ex_pc;
@@ -143,6 +148,7 @@ module ex_mem_pipeline(
             int_mem_invalid_instruction <= ex_invalid_instruction;
             int_mem_next_pc <= ex_next_pc;
             int_mem_inst_vector <= ex_inst_vector;
+            int_mem_flag <= ex_flag;
         end
     end
 
@@ -168,5 +174,6 @@ module ex_mem_pipeline(
     assign mem_invalid_instruction = (stall) ? 1'b0 : int_mem_invalid_instruction;
     assign mem_next_pc = (stall) ? 32'b0 : int_mem_next_pc;
     assign mem_inst_vector = (stall) ? 11'b0 : int_mem_inst_vector;
+    assign mem_flag = (stall) ? 6'b0 : int_mem_flag;
 
 endmodule
