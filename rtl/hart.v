@@ -184,7 +184,7 @@ module hart #(
     wire ex_redirect_raw;
     wire ex_redirect;
     wire [31:0] mem_pc;
-    wire [31:0] mem_inst;
+    wire [31:0] mem_inst_word; // Renamed to avoid collision with module instance mem_inst
     wire [31:0] mem_imm;
     wire [31:0] mem_rs1_data;
     wire [31:0] mem_rs2_data;
@@ -213,6 +213,8 @@ module hart #(
     wire [4:0] wb_write_dad_addrs;
     wire [4:0] wb_rs1_addr;
     wire [4:0] wb_rs2_addr;
+    wire [31:0] wb_rs1_data; // Explicit 32-bit width
+    wire [31:0] wb_rs2_data; // Explicit 32-bit width
     wire wb_is_lui;
     wire wb_is_jal;
     wire wb_is_jalr;
@@ -227,6 +229,10 @@ module hart #(
     wire mem_regwrite;
     wire mem_trap;
     wire ex_regwrite;
+    wire hazard_trap;
+
+    wire stall_ex_mem, stall_id_ex, stall_mem_wb;
+    wire clear_ex_mem, clear_id_ex, clear_mem_wb;
 
     fetch #(
         .RESET_ADDR(RESET_ADDR)
@@ -297,8 +303,6 @@ module hart #(
         .stall(stall_id_ex),
         .id_pc(id_pc),
         .id_inst(id_inst),
-        .id_rs1_addr(id_rs1_addr),
-        .id_rs2_addr(id_rs2_addr),
         .id_valid(id_valid),
         .imm(imm),
         .rs1_data(rs1_data),
@@ -321,8 +325,6 @@ module hart #(
         .invalid_instruction(invalid_instruction),
         .ex_pc(ex_pc),
         .ex_inst(ex_inst),
-        .ex_rs1_addr(ex_rs1_addr),
-        .ex_rs2_addr(ex_rs2_addr),
         .ex_imm(ex_imm),
         .ex_rs1_data(ex_rs1_data),
         .ex_rs2_data(ex_rs2_data),
@@ -396,10 +398,10 @@ module hart #(
         .ex_valid(ex_valid),
         .ex_is_ebreak(ex_is_ebreak),
         .ex_invalid_instruction(ex_invalid_instruction),
-        .ex_rs1_addr(ex_rs1_addr),
-        .ex_rs2_addr(ex_rs2_addr),
+        .ex_rs1_addr(ex_inst[19:15]),
+        .ex_rs2_addr(ex_inst[24:20]),
         .mem_pc(mem_pc),
-        .mem_inst(mem_inst),
+        .mem_inst(mem_inst_word),
         .mem_imm(mem_imm),
         .mem_rs1_data(mem_rs1_data),
         .mem_rs2_data(mem_rs2_data),
@@ -427,7 +429,7 @@ module hart #(
         .i_dmem_rdata(i_dmem_rdata),
         .rs2_data(mem_rs2_data),
         .alu_result(mem_alu_result),
-        .instruction(mem_inst),
+        .instruction(mem_inst_word),
         .is_load(mem_is_load),
         .is_store(mem_is_store),
         .illegal_instruction(mem_invalid_instruction),
@@ -452,8 +454,8 @@ module hart #(
         .imm(mem_imm),
         .load_rslt(load_data),
         .alu_result(mem_alu_result),
-        .mem_inst(mem_inst),
-        .write_dad_addrs(mem_inst[11:7]),
+        .mem_inst(mem_inst_word),
+        .write_dad_addrs(mem_inst_word[11:7]),
         .mem_rs1_addr(mem_rs1_addr),
         .mem_rs2_addr(mem_rs2_addr),
         .mem_rs1_data(mem_rs1_data),
@@ -498,20 +500,26 @@ module hart #(
         mem_is_auipc ||
         mem_is_jal ||
         mem_is_jalr) &&
-        (mem_inst[11:7] != 5'd0);
+        (mem_inst_word[11:7] != 5'd0);
     
     hazard_ctrl hazard_ctrl_inst (
+        .clk(i_clk),
         .rs1_addr(id_inst[19:15]),
         .rs2_addr(id_inst[24:20]),
-        .id_uses_rs1(uses_rs1),
-        .id_uses_rs2(uses_rs2),
+        .is_load(is_load),
+        .is_store(is_store),
+        .ex_is_load(ex_is_load),
+        .ex_is_store(ex_is_store),
+        .mem_is_load(mem_is_load),
+        .mem_is_store(mem_is_store),
         .id_flags(id_flags),
         .id_ex_flgs(ex_flag),
-        .ex_mem_flgs(mem_flags),
-        .mem_wb_flgs(wb_flags),
+        .ex_mem_flgs(6'd0),
+        .mem_wb_flgs(6'd0),
         .ebreak_triggered(is_ebreak),
         .ex_rd_addr(ex_inst[11:7]),
-        .mem_rd_addr(mem_inst[11:7]),
+        .mem_rd_addr(mem_inst_word[11:7]),
+        .wb_rd_addr(wb_rd_addr),
         .ex_redirect(ex_redirect),
         .stall_ex_mem(stall_ex_mem),
         .stall_id_ex(stall_id_ex),
@@ -521,11 +529,7 @@ module hart #(
         .clear_id_ex(clear_id_ex),
         .clear_if_id(clear_if_id),
         .clear_mem_wb(clear_mem_wb),
-        .o_trap(hazard_trap),
-        .ex_regwrite(ex_regwrite),
-        .mem_regwrite(mem_regwrite),
-        .wb_regwrite(wb_regwrite),
-        .wb_rd_addr(wb_rd_addr)
+        .o_trap(hazard_trap)
     );
 
     assign wb_rd_data =
@@ -544,7 +548,7 @@ module hart #(
         (wb_rd_addr != 5'd0);
 
     assign ex_regwrite =
-        ex_valid &&
+        wb_valid &&
         !ex_invalid_instruction &&
         (ex_is_rtype ||
         ex_is_itype ||
@@ -555,31 +559,27 @@ module hart #(
         ex_is_jalr) &&
         (ex_inst[11:7] != 5'd0);
 
-    // wire uses_rs1 = id_valid && (is_rtype || is_itype_alu || is_load || is_store || is_branch || is_jalr);
-    // wire uses_rs2 = id_valid && (is_rtype || is_store || is_branch);
-
     wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
     wire wb_uses_rs2 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011);
 
-
-    assign o_retire_valid     = wb_valid;
+    assign o_retire_valid       = wb_valid;
     //Changed from instruction to wb_inst after passing through all pipes
-    assign o_retire_inst      = wb_inst;
+    assign o_retire_inst        = wb_inst;
     // TODO: do we pass through iligal isncutions all the way torugh or do we isnert noop? ALex-> I think it should be like we pass it all the way through
-    assign o_retire_trap      = wb_trap;
-    assign o_retire_halt      = wb_halt;
+    assign o_retire_trap        = wb_trap;
+    assign o_retire_halt        = wb_is_ebreak;
     //TODO: Change from instruction[19:15] to wb_rs1_addr and instruction[24:20] to wb_rs2_addr after passing through the fetch pipe
     assign o_retire_rs1_raddr = wb_uses_rs1 ? wb_rs1_addr : 5'd0;
     assign o_retire_rs2_raddr = wb_uses_rs2 ? wb_rs2_addr : 5'd0;
     //Changed rs1_data and rs2_data to ex_reg_data_1 and ex_reg_data_2 after passing through all pipes
-    assign o_retire_rs1_rdata = wb_reg_data_1;
-    assign o_retire_rs2_rdata = wb_reg_data_2;
+    assign o_retire_rs1_rdata = wb_rs1_data;
+    assign o_retire_rs2_rdata = wb_rs2_data;
 
     wire reg_write_allowed = wb_regwrite;
     //TODO: Change from rd_waddr to wb_write_dad_addrs after passing through the mem pipe
     assign o_retire_rd_waddr  = reg_write_allowed ? wb_write_dad_addrs : 5'd0;
 
-    assign o_retire_rd_wdata  = wb_data_out;
+    assign o_retire_rd_wdata  = wb_rd_data;
     assign o_retire_pc        = wb_mem_pc;
     assign o_retire_next_pc   = wb_pc_rslt;
 

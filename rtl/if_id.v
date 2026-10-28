@@ -12,7 +12,7 @@ module if_id_pipline(
 );
 
 
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge clk) begin
         if(!rst_n) begin
             id_pc <= 32'b0;
             id_inst <= 32'h00000013;

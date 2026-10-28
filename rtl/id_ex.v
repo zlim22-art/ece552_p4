@@ -73,7 +73,7 @@ module id_ex_pipeline(
     reg int_ex_is_ebreak;
     reg int_ex_invalid_instruction;
 
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge clk ) begin
         if (!rst_n) begin
             int_ex_pc                  <= 32'b0;
             int_ex_inst                <= 32'b0;
