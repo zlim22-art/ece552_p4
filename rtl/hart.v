@@ -555,8 +555,12 @@ module hart #(
         ex_is_jalr) &&
         (ex_inst[11:7] != 5'd0);
 
-    wire uses_rs1 = id_valid && (is_rtype || is_itype_alu || is_load || is_store || is_branch || is_jalr);
-    wire uses_rs2 = id_valid && (is_rtype || is_store || is_branch);
+    // wire uses_rs1 = id_valid && (is_rtype || is_itype_alu || is_load || is_store || is_branch || is_jalr);
+    // wire uses_rs2 = id_valid && (is_rtype || is_store || is_branch);
+
+    wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
+    wire wb_uses_rs2 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011);
+
 
     assign o_retire_valid     = wb_valid;
     //Changed from instruction to wb_inst after passing through all pipes

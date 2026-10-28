@@ -3,6 +3,17 @@ module hazard_ctrl(
     input wire [4:0] rs1_addr,
     input wire [4:0] rs2_addr,
     
+
+
+    input wire is_load,
+    input wire is_store,
+
+    input wire ex_is_load,
+    input wire ex_is_store,
+
+    input wire mem_is_load,
+    input wire mem_is_store,
+
     input wire [5:0] id_flags,
     input wire [5:0] id_ex_flgs,
     input wire [5:0] ex_mem_flgs,
@@ -28,7 +39,7 @@ module hazard_ctrl(
 );
 
 wire uses_rs1;
-
+wire mem_hazard;
 wire RAW_hazzard;
 wire RAW_hazzard_in_ex;
 wire RAW_hazzard_in_mem;
@@ -54,22 +65,26 @@ assign RAW_hazzard_in_mem=(uses_rs1 && writes_ahead && |rs1_addr) &&
 
 assign  RAW_hazzard= RAW_hazzard_in_ex || RAW_hazzard_in_mem;
 
+// adreses matches for RAW or is for whatver reason your wirritng and the next oneis indexing usngt the same one. 
 
+assign mem_hazard = (is_load || is_store) && (
+                        ( (ex_is_load || ex_is_store) && |ex_rd_addr && (rs1_addr == ex_rd_addr) ) ||
+                        ( (mem_is_load || mem_is_store) && |mem_rd_addr && (rs1_addr == mem_rd_addr) )
+                        );
+
+// contorl hazard
 assign flush_if_id=ex_redirect;
 assign flush_id_ex=ex_redirect;
 
 
+//
 
-assign stall_if_id=(RAW_hazzard) ;
-assign stall_id_ex=(RAW_hazzard);
-assign clear_ex_mem =(RAW_hazzard);
-
-
-
+// Stlls makes it insert noops and also not chnage its current value. So the vlaues being frwared all all zero
+assign stall_if_id=(RAW_hazzard) ||  ex_redirect || mem_hazard;
+assign stall_id_ex=(RAW_hazzard) || ex_redirect || mem_hazard ;
 
 
-
-
+// memeory hazard
 
 assign clear_if_id=(pc_hazzard || ebreak_triggered);
 assign 0_trap=( ~|ex_mem_flgs && ~|mem_wb_flgs) && ebreak_triggered;
