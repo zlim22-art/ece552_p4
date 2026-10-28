@@ -23,7 +23,9 @@ module decode (
     output wire o_unsigned,
     output wire o_arith,
     output wire invalid_instruction,
-    output wire is_ebreak
+    output wire is_ebreak,
+    output wire [4:0] rs1_addr,
+    output wire [4:0] rs2_addr
 );
 
     flag_gen flag_gen_inst (
@@ -66,9 +68,6 @@ module decode (
         .o_rs1_rdata (rs1_data), 
         .o_rs2_rdata (rs2_data)  
     );
-
-    wire [4:0] rs1_addr;
-    wire [4:0] rs2_addr;
 
     assign rs1_addr = instruction[19:15];
     assign rs2_addr = instruction[24:20];

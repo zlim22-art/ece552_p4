@@ -24,11 +24,15 @@ module id_ex_pipeline(
     input wire i_arith,
     input wire i_unsigned,
     input wire [2:0] op_sell,
+    input wire [4:0] id_rs1_addr,
+    input wire [4:0] id_rs2_addr,
     output reg [31:0] ex_pc,
     output reg [31:0] ex_inst,
     output reg [31:0] ex_imm,
     output reg [31:0] ex_rs1_data,
     output reg [31:0] ex_rs2_data,
+    output reg [4:0] ex_rs1_addr,
+    output reg [4:0] ex_rs2_addr,
     output reg ex_is_auipc,
     output reg ex_is_jal,
     output reg ex_is_jalr,
@@ -70,6 +74,8 @@ module id_ex_pipeline(
             ex_i_unsigned <= 1'b0;
             ex_op_sell <= 3'b0;
             ex_valid <= 1'b0;
+            ex_rs1_addr <= 5'b0;
+            ex_rs2_addr <= 5'b0;
             ex_is_ebreak <= 1'b0;
             ex_invalid_instruction <= 1'b0;
         end else begin
@@ -78,6 +84,8 @@ module id_ex_pipeline(
             ex_imm <= imm;
             ex_rs1_data <= rs1_data;
             ex_rs2_data <= rs2_data;
+            ex_rs1_addr <= id_rs1_addr;
+            ex_rs2_addr <= id_rs2_addr;
             ex_is_auipc <= is_auipc;
             ex_is_jal <= is_jal;
             ex_is_jalr <= is_jalr;

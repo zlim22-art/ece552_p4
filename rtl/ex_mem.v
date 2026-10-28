@@ -1,18 +1,13 @@
 module ex_mem_pipeline(
-
-    // FROM id_ex_pipeline
     input clk,
     input rst_n,
     input [31:0] ex_pc,
     input [31:0] ex_inst,
-
-    //From Register file
+    input wire [4:0] ex_rs1_addr,
+    input wire [4:0] ex_rs2_addr,
     input wire [31:0] ex_rs1_data,
     input wire [31:0] ex_rs2_data,
-        
     input wire [31:0] ex_imm,
-
-    // Flag gen
     input wire ex_is_auipc,
     input wire ex_is_jal,
     input wire ex_is_jalr,
@@ -22,16 +17,11 @@ module ex_mem_pipeline(
     input wire ex_is_rtype,
     input wire ex_is_itype,
     input wire ex_is_lui, 
-
     input wire ex_valid,
     input wire ex_is_ebreak,
     input wire ex_invalid_instruction,
     input wire [31:0] ex_next_pc,   
-
-    // ALU output
     input wire [31:0] alu_result,
-
-    // TO mem_wb_pipeline
     output reg [31:0] mem_pc,
     output reg [31:0] mem_inst,
     output reg [31:0] mem_imm,
@@ -47,7 +37,8 @@ module ex_mem_pipeline(
     output reg mem_is_itype,
     output reg mem_is_lui,
     output reg [31:0] mem_alu_result,
-
+    output reg [4:0] mem_rs1_addr,
+    output reg [4:0] mem_rs2_addr,
     output reg mem_valid,
     output reg mem_is_ebreak,
     output reg mem_invalid_instruction,
@@ -61,6 +52,8 @@ module ex_mem_pipeline(
             mem_imm <= 32'b0;
             mem_rs1_data <= 32'b0;
             mem_rs2_data <= 32'b0;
+            mem_rs1_addr <= 5'b0;
+            mem_rs2_addr <= 5'b0;
             mem_is_auipc <= 1'b0;
             mem_is_jal <= 1'b0;
             mem_is_jalr <= 1'b0;
@@ -91,6 +84,8 @@ module ex_mem_pipeline(
             mem_is_rtype <= ex_is_rtype;
             mem_is_itype <= ex_is_itype;
             mem_is_lui <= ex_is_lui;
+            mem_rs1_addr <= ex_rs1_addr;
+            mem_rs2_addr <= ex_rs2_addr;
             mem_alu_result <= alu_result;
             mem_valid <= ex_valid;
             mem_is_ebreak <= ex_is_ebreak;
