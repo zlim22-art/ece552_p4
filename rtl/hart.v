@@ -294,6 +294,7 @@ module hart #(
         .clk(i_clk),
         .rst_n(~i_rst),
         .flush(clear_id_ex),
+        .stall(stall_id_ex),
         .id_pc(id_pc),
         .id_inst(id_inst),
         .id_rs1_addr(id_rs1_addr),
@@ -374,6 +375,8 @@ module hart #(
     ex_mem_pipeline ex_mem_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
+        .flush(clear_ex_mem),
+        .stall(stall_ex_mem),
         .ex_pc(ex_pc),
         .ex_inst(ex_inst),
         .ex_imm(ex_imm),
@@ -442,6 +445,8 @@ module hart #(
     mem_wb_pipline mem_wb_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
+        .flush(clear_mem_wb),
+        .stall(stall_mem_wb),
         .mem_pc(mem_pc),
         .pc_rslt(mem_next_pc),
         .imm(mem_imm),

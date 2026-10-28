@@ -20,6 +20,8 @@ module ex_mem_pipeline(
     input wire ex_valid,
     input wire ex_is_ebreak,
     input wire ex_invalid_instruction,
+    input wire flush,
+    input wire stall,
     input wire [31:0] ex_next_pc,   
     input wire [31:0] alu_result,
     output reg [31:0] mem_pc,
@@ -69,6 +71,29 @@ module ex_mem_pipeline(
             mem_invalid_instruction <= 1'b0;
             mem_next_pc <= 32'b0;
         end
+        else if (flush) begin
+            mem_pc <= 32'b0;
+            mem_inst <= 32'b0;
+            mem_imm <= 32'b0;
+            mem_rs1_data <= 32'b0;
+            mem_rs2_data <= 32'b0;
+            mem_rs1_addr <= 5'b0;
+            mem_rs2_addr <= 5'b0;
+            mem_is_auipc <= 1'b0;
+            mem_is_jal <= 1'b0;
+            mem_is_jalr <= 1'b0;
+            mem_is_branch <= 1'b0;
+            mem_is_load <= 1'b0;
+            mem_is_store <= 1'b0;
+            mem_is_rtype <= 1'b0;
+            mem_is_itype <= 1'b0;
+            mem_is_lui <= 1'b0;
+            mem_alu_result <= 32'b0;
+            mem_valid <= 1'b0;
+            mem_is_ebreak <= 1'b0;
+            mem_invalid_instruction <= 1'b0;
+            mem_next_pc <= 32'b0;
+        end
         else begin
             mem_pc <= ex_pc;
             mem_inst <= ex_inst;
@@ -93,5 +118,27 @@ module ex_mem_pipeline(
             mem_next_pc <= ex_next_pc;
         end
     end
+
+    assign mem_pc = (stall) ? 32'b0 : mem_pc;
+    assign mem_inst = (stall) ? 32'b0 : mem_inst;
+    assign mem_imm = (stall) ? 32'b0 : mem_imm;
+    assign mem_rs1_data = (stall) ? 32'b0 : mem_rs1_data;
+    assign mem_rs2_data = (stall) ? 32'b0 : mem_rs2_data;
+    assign mem_is_auipc = (stall) ? 1'b0 : mem_is_auipc;
+    assign mem_is_jal = (stall) ? 1'b0 : mem_is_jal;
+    assign mem_is_jalr = (stall) ? 1'b0 : mem_is_jalr;
+    assign mem_is_branch = (stall) ? 1'b0 : mem_is_branch;
+    assign mem_is_load = (stall) ? 1'b0 : mem_is_load;
+    assign mem_is_store = (stall) ? 1'b0 : mem_is_store;
+    assign mem_is_rtype = (stall) ? 1'b0 : mem_is_rtype;
+    assign mem_is_itype = (stall) ? 1'b0 : mem_is_itype;
+    assign mem_is_lui = (stall) ? 1'b0 : mem_is_lui;
+    assign mem_alu_result = (stall) ? 32'b0 : mem_alu_result;
+    assign mem_rs1_addr = (stall) ? 5'b0 : mem_rs1_addr;
+    assign mem_rs2_addr = (stall) ? 5'b0 : mem_rs2_addr;
+    assign mem_valid = (stall) ? 1'b0 : mem_valid;
+    assign mem_is_ebreak = (stall) ? 1'b0 : mem_is_ebreak;
+    assign mem_invalid_instruction = (stall) ? 1'b0 : mem_invalid_instruction;
+    assign mem_next_pc = (stall) ? 32'b0 : mem_next_pc;
 
 endmodule
