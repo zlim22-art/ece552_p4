@@ -7,6 +7,8 @@ module mem_wb_pipline (
     input wire [31:0] load_rslt,
     input wire [31:0] alu_result,
     input wire [31:0] mem_inst,
+    input wire [31:0] mem_rs1_data,
+    input wire [31:0] mem_rs2_data,
     input wire [4:0] write_dad_addrs,
     input wire is_lui,
     input wire is_jal,
@@ -16,6 +18,8 @@ module mem_wb_pipline (
     input wire mem_valid,
     input wire mem_is_ebreak,
     input wire mem_trap,
+    input wire [4:0] mem_rs1_addr,
+    input wire [4:0] mem_rs2_addr,
     output reg [31:0] wb_mem_pc,
     output reg [31:0] wb_pc_rslt,
     output reg [31:0] wb_imm,
@@ -28,6 +32,10 @@ module mem_wb_pipline (
     output reg wb_is_jalr,
     output reg wb_is_load,
     output reg wb_writes_rd,
+    output reg [31:0] wb_rs1_data,
+    output reg [31:0] wb_rs2_data,
+    output reg [4:0] wb_rs1_addr,
+    output reg [4:0] wb_rs2_addr,
     output reg wb_valid,
     output reg wb_is_ebreak,
     output reg wb_trap
@@ -50,6 +58,10 @@ module mem_wb_pipline (
             wb_valid <= 1'b0;
             wb_is_ebreak <= 1'b0;
             wb_trap <= 1'b0;
+            wb_rs1_addr <= 5'b0;
+            wb_rs2_addr <= 5'b0;
+            wb_rs1_data <= 32'b0;
+            wb_rs2_data <= 32'b0;
         end
         else begin
             wb_mem_pc <= mem_pc;
@@ -66,6 +78,10 @@ module mem_wb_pipline (
             wb_writes_rd <= mem_regwrite;
             wb_valid <= mem_valid;
             wb_is_ebreak <= mem_is_ebreak;
+            wb_rs1_data <= mem_rs1_data;
+            wb_rs2_data <= mem_rs2_data;
+            wb_rs1_addr <= mem_rs1_addr;
+            wb_rs2_addr <= mem_rs2_addr;
             wb_trap <= mem_valid && mem_trap;
         end
     end

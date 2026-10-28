@@ -162,6 +162,8 @@ module hart #(
     wire [31:0] ex_imm;
     wire [31:0] ex_rs1_data;
     wire [31:0] ex_rs2_data;
+    wire [4:0] ex_rs1_addr;
+    wire [4:0] ex_rs2_addr;
     wire ex_is_auipc;
     wire ex_is_jal;
     wire ex_is_jalr;
@@ -187,6 +189,8 @@ module hart #(
     wire [31:0] mem_rs1_data;
     wire [31:0] mem_rs2_data;
     wire [31:0] mem_alu_result;
+    wire [4:0] mem_rs1_addr;
+    wire [4:0] mem_rs2_addr;
     wire [31:0] mem_next_pc;
     wire mem_is_auipc;
     wire mem_is_jal;
@@ -207,6 +211,8 @@ module hart #(
     wire [31:0] wb_alu_result;
     wire [31:0] wb_inst;
     wire [4:0] wb_write_dad_addrs;
+    wire [4:0] wb_rs1_addr;
+    wire [4:0] wb_rs2_addr;
     wire wb_is_lui;
     wire wb_is_jal;
     wire wb_is_jalr;
@@ -279,7 +285,9 @@ module hart #(
         .o_unsigned(alu_unsigned),
         .o_arith(alu_arith),
         .invalid_instruction(invalid_instruction),
-        .is_ebreak(is_ebreak)
+        .is_ebreak(is_ebreak),
+        .rs1_addr(id_rs1_addr),
+        .rs2_addr(id_rs2_addr)
     );
 
     id_ex_pipeline id_ex_inst (
@@ -385,6 +393,8 @@ module hart #(
         .ex_valid(ex_valid),
         .ex_is_ebreak(ex_is_ebreak),
         .ex_invalid_instruction(ex_invalid_instruction),
+        .ex_rs1_addr(ex_rs1_addr),
+        .ex_rs2_addr(ex_rs2_addr),
         .mem_pc(mem_pc),
         .mem_inst(mem_inst),
         .mem_imm(mem_imm),
@@ -403,7 +413,9 @@ module hart #(
         .mem_valid(mem_valid),
         .mem_is_ebreak(mem_is_ebreak),
         .mem_invalid_instruction(mem_invalid_instruction),
-        .mem_next_pc(mem_next_pc)
+        .mem_next_pc(mem_next_pc),
+        .mem_rs1_addr(mem_rs1_addr),
+        .mem_rs2_addr(mem_rs2_addr)
     );
 
     assign ex_redirect = ex_valid && ex_redirect_raw;
@@ -437,6 +449,10 @@ module hart #(
         .alu_result(mem_alu_result),
         .mem_inst(mem_inst),
         .write_dad_addrs(mem_inst[11:7]),
+        .mem_rs1_addr(mem_rs1_addr),
+        .mem_rs2_addr(mem_rs2_addr),
+        .mem_rs1_data(mem_rs1_data),
+        .mem_rs2_data(mem_rs2_data),
         .is_lui(mem_is_lui),
         .is_jal(mem_is_jal),
         .is_jalr(mem_is_jalr),
@@ -452,6 +468,10 @@ module hart #(
         .wb_alu_result(wb_alu_result),
         .wb_inst(wb_inst),
         .wb_write_dad_addrs(wb_write_dad_addrs),
+        .wb_rs1_addr(wb_rs1_addr),
+        .wb_rs2_addr(wb_rs2_addr),
+        .wb_rs1_data(wb_rs1_data),
+        .wb_rs2_data(wb_rs2_data),
         .wb_is_lui(wb_is_lui),
         .wb_is_jal(wb_is_jal),
         .wb_is_jalr(wb_is_jalr),
