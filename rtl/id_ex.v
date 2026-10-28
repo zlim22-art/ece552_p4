@@ -50,7 +50,6 @@ module id_ex_pipeline(
     output wire ex_invalid_instruction
 );
 
-    // Internal pipeline registers (hold state when stalled)
     reg [31:0] int_ex_pc;
     reg [31:0] int_ex_inst;
     reg [31:0] int_ex_imm;
@@ -75,7 +74,30 @@ module id_ex_pipeline(
     reg        int_ex_invalid_instruction;
 
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n || flush) begin
+        if (!rst_n) begin
+            int_ex_pc                  <= 32'b0;
+            int_ex_inst                <= 32'b0;
+            int_ex_imm                 <= 32'b0;
+            int_ex_rs1_data            <= 32'b0;
+            int_ex_rs2_data            <= 32'b0;
+            int_ex_is_auipc            <= 1'b0;
+            int_ex_is_jal              <= 1'b0;
+            int_ex_is_jalr             <= 1'b0;
+            int_ex_is_branch           <= 1'b0;
+            int_ex_is_load             <= 1'b0;
+            int_ex_is_store            <= 1'b0;
+            int_ex_is_rtype            <= 1'b0;
+            int_ex_is_itype            <= 1'b0;
+            int_ex_is_lui              <= 1'b0;
+            int_ex_flag                <= 6'b0;
+            int_ex_i_sub               <= 1'b0;
+            int_ex_i_arith             <= 1'b0;
+            int_ex_i_unsigned          <= 1'b0;
+            int_ex_op_sell             <= 3'b0;
+            int_ex_valid               <= 1'b0;
+            int_ex_is_ebreak           <= 1'b0;
+            int_ex_invalid_instruction <= 1'b0;
+        end else if (flush) begin
             int_ex_pc                  <= 32'b0;
             int_ex_inst                <= 32'b0;
             int_ex_imm                 <= 32'b0;
