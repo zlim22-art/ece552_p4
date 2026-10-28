@@ -1,5 +1,5 @@
 module hazard_ctrl(
-
+    input wire clk,
     input wire [4:0] rs1_addr,
     input wire [4:0] rs2_addr,
     
@@ -12,7 +12,6 @@ module hazard_ctrl(
     input wire [4:0] ex_rd_addr,
     input wire [4:0] mem_rd_addr,
     input wire [4:0] wb_rd_addr,
-
     input wire ex_redirect,
 
     output wire stall_ex_mem,
@@ -35,6 +34,7 @@ wire RAW_hazzard_in_ex;
 wire RAW_hazzard_in_mem;
 wire pc_hazzard;
 wire pc_hazzard_in_ex;
+wire cntrl_hazzard;
 wire pc_hazzard_in_mem;
 
 // for RAW hazzard
@@ -54,34 +54,26 @@ assign RAW_hazzard_in_mem=(uses_rs1 && writes_ahead && |rs1_addr) &&
 
 assign  RAW_hazzard= RAW_hazzard_in_ex || RAW_hazzard_in_mem;
 
-assign stall_if_id=(RAW_hazzard);
-assign clear_id_ex=(RAW_hazzard);
+
+assign flush_if_id=ex_redirect;
+assign flush_id_ex=ex_redirect;
 
 
 
-// THis assumes tht PC control is movvec back
-
-assign pc_hazzard_in_ex=ex_mem_flag[3] || ex_mem_flag[5] || ex_is_jalr;
-assign pc_hazzard=  pc_hazzard_in_ex;
-
+assign stall_if_id=(RAW_hazzard) ;
+assign stall_id_ex=(RAW_hazzard);
+assign clear_ex_mem =(RAW_hazzard);
 
 
-// ebreak neets to be set in the wb stage 
-// insert nops until the brnahcing is done
 
 
-// This assumes ebreak is triggered in the id stage and saved so i can spamm clear over and over again
+
+
+
+
 assign clear_if_id=(pc_hazzard || ebreak_triggered);
-
-// essetially here we input noops. untilt the whole thing is filled with noops then we raise flag and the termination is offcial.
-
-// jalr is ,isisng come up with new way to represent if therei sinsitcitons.
 assign 0_trap=( ~|ex_mem_flgs && ~|mem_wb_flgs) && ebreak_triggered;
 
-
-
-
-// maybe the
 
 
 endmodule
