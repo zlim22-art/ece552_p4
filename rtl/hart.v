@@ -158,7 +158,6 @@ module hart #(
     wire [4:0]  id_rs2_addr;
     wire stall_pc;
     wire stall_if_id;
-    wire clear_if_id;
     wire if_valid;
     wire id_valid;
     wire [31:0] ex_next_pc;
@@ -181,6 +180,8 @@ module hart #(
     wire ex_is_itype;
     wire ex_is_lui;
     wire [5:0] ex_flag;
+    wire [5:0] ex_mem_flgs;
+    wire [5:0] mem_wb_flgs;
     wire ex_i_sub;
     wire ex_i_arith;
     wire ex_i_unsigned;
@@ -237,9 +238,10 @@ module hart #(
     wire mem_trap;
     wire ex_regwrite;
     wire hazard_trap;
+    wire valid_id;
 
     wire stall_ex_mem, stall_id_ex, stall_mem_wb;
-    wire clear_ex_mem, clear_id_ex, clear_mem_wb;
+    wire clear_ex_mem, clear_id_ex, clear_if_id, clear_mem_wb;
 
     wire [31:0] dmem_addr_wire;
     wire        dmem_ren_wire;
@@ -282,7 +284,7 @@ module hart #(
         .id_inst(id_inst),
         .id_valid(id_valid)
     );
-
+    wire [10:0] id_inst_vector;
     decode decode_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
@@ -310,10 +312,13 @@ module hart #(
         .invalid_instruction(invalid_instruction),
         .is_ebreak(is_ebreak),
         .rs1_addr(id_rs1_addr),
-        .rs2_addr(id_rs2_addr)
+        .rs2_addr(id_rs2_addr),
+        .inst_vector(id_inst_vector)
     );
 
+    wire [10:0] ex_inst_vector;
     id_ex_pipeline id_ex_inst (
+        .id_inst_vector(id_inst_vector),
         .clk(i_clk),
         .rst_n(~i_rst),
         .flush(clear_id_ex),
@@ -361,7 +366,8 @@ module hart #(
         .ex_op_sell(ex_op_sell),
         .ex_valid(ex_valid),
         .ex_is_ebreak(ex_is_ebreak),
-        .ex_invalid_instruction(ex_invalid_instruction)
+        .ex_invalid_instruction(ex_invalid_instruction),
+        .ex_inst_vector(ex_inst_vector)
     );
 
     execute execute_inst (
@@ -391,7 +397,9 @@ module hart #(
         .ex_redirect(ex_redirect_raw)
     );
 
+    wire [10:0] mem_inst_vector;
     ex_mem_pipeline ex_mem_inst (
+        .ex_inst_vector(ex_inst_vector),
         .clk(i_clk),
         .rst_n(~i_rst),
         .flush(clear_ex_mem),
@@ -417,6 +425,9 @@ module hart #(
         .ex_invalid_instruction(ex_invalid_instruction),
         .ex_rs1_addr(ex_inst[19:15]),
         .ex_rs2_addr(ex_inst[24:20]),
+        // Piping flags through EX->MEM pipeline
+        .ex_flag(ex_flag),
+        .mem_flag(ex_mem_flgs),
         .mem_pc(mem_pc),
         .mem_inst(mem_inst_word),
         .mem_imm(mem_imm),
@@ -437,7 +448,8 @@ module hart #(
         .mem_invalid_instruction(mem_invalid_instruction),
         .mem_next_pc(mem_next_pc),
         .mem_rs1_addr(mem_rs1_addr),
-        .mem_rs2_addr(mem_rs2_addr)
+        .mem_rs2_addr(mem_rs2_addr),
+        .mem_inst_vector(mem_inst_vector)
     );
 
     assign ex_redirect = ex_valid && ex_redirect_raw;
@@ -467,11 +479,17 @@ module hart #(
     assign o_dmem_wdata = dmem_wdata_wire;
     assign o_dmem_mask  = dmem_mask_wire;
 
+    wire [10:0] wb_inst_vector;
+    
     mem_wb_pipline mem_wb_inst (
+        .mem_inst_vector(mem_inst_vector),
         .clk(i_clk),
         .rst_n(~i_rst),
         .flush(clear_mem_wb),
         .stall(stall_mem_wb),
+        // Piping flags through MEM->WB pipeline
+        .mem_flag(ex_mem_flgs),
+        .wb_flag(mem_wb_flgs),
         .mem_pc(mem_pc),
         .pc_rslt(mem_next_pc),
         .imm(mem_imm),
@@ -521,7 +539,8 @@ module hart #(
         .wb_dmem_wen(wb_dmem_wen),
         .wb_dmem_mask(wb_dmem_mask),
         .wb_dmem_wdata(wb_dmem_wdata),
-        .wb_dmem_rdata(wb_dmem_rdata)
+        .wb_dmem_rdata(wb_dmem_rdata),
+        .wb_inst_vector(wb_inst_vector)
     );
 
     assign mem_trap = mem_invalid_instruction || memory_misaligned;
@@ -537,10 +556,19 @@ module hart #(
         mem_is_jalr) &&
         (mem_inst_word[11:7] != 5'd0);
     
+    assign valid_id = id_valid;
     hazard_ctrl hazard_ctrl_inst (
         .clk(i_clk),
         .rs1_addr(id_inst[19:15]),
         .rs2_addr(id_inst[24:20]),
+        .id_inst_vector(id_inst_vector),
+        .ex_inst_vector(ex_inst_vector),
+        .mem_inst_vector(mem_inst_vector),
+        .wb_inst_vector(wb_inst_vector),
+        .valid_id(valid_id),
+        .valid_ex(ex_valid),
+        .valid_mem(mem_valid),
+        .valid_wb(wb_valid),
         .is_load(is_load),
         .is_store(is_store),
         .ex_is_load(ex_is_load),
@@ -549,8 +577,8 @@ module hart #(
         .mem_is_store(mem_is_store),
         .id_flags(id_flags),
         .id_ex_flgs(ex_flag),
-        .ex_mem_flgs(6'd0),
-        .mem_wb_flgs(6'd0),
+        .ex_mem_flgs(ex_mem_flgs),
+        .mem_wb_flgs(mem_wb_flgs),
         .ebreak_triggered(is_ebreak),
         .ex_rd_addr(ex_inst[11:7]),
         .mem_rd_addr(mem_inst_word[11:7]),

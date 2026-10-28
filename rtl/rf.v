@@ -1,7 +1,7 @@
 `default_nettype none
 
 module rf #(
-    parameter BYPASS_EN = 0
+    parameter BYPASS_EN = 1
 ) (
     input  wire        i_clk,
     input  wire        i_rst,

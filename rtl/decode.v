@@ -25,7 +25,8 @@ module decode (
     output wire invalid_instruction,
     output wire is_ebreak,
     output wire [4:0] rs1_addr,
-    output wire [4:0] rs2_addr
+    output wire [4:0] rs2_addr,
+    output wire [10:0] inst_vector      // makes stuff esier when piping this
 );
 
     flag_gen flag_gen_inst (
@@ -77,5 +78,18 @@ module decode (
     assign invalid_instruction = !(is_rtype || is_itype_alu || is_load || is_store ||
                                    is_branch || is_jal || is_jalr || is_lui || is_auipc ||
                                    is_ebreak);
+    assign inst_vector = {
+        is_rtype,            // [10]
+        is_itype_alu,        // [9]
+        is_load,             // [8]
+        is_store,            // [7]
+        is_branch,           // [6]
+        is_jal,              // [5]
+        is_jalr,             // [4]
+        is_lui,              // [3]
+        is_auipc,            // [2]
+        is_ebreak,           // [1]
+        invalid_instruction  // [0]
+    };
 
 endmodule

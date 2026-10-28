@@ -1,4 +1,5 @@
 module mem_wb_pipline (
+    input wire [10:0] mem_inst_vector,
     input wire clk,
     input wire rst_n,
     input wire [31:0] mem_pc,
@@ -52,7 +53,8 @@ module mem_wb_pipline (
     output wire wb_dmem_wen,
     output wire [3:0] wb_dmem_mask,
     output wire [31:0] wb_dmem_wdata,
-    output wire [31:0] wb_dmem_rdata
+    output wire [31:0] wb_dmem_rdata,
+    output wire [10:0] wb_inst_vector
 );
     reg [31:0] int_wb_mem_pc;
     reg [31:0] int_wb_pc_rslt;
@@ -79,6 +81,7 @@ module mem_wb_pipline (
     reg [3:0] int_wb_dmem_mask;
     reg [31:0] int_wb_dmem_wdata;
     reg [31:0] int_wb_dmem_rdata;
+    reg [10:0] int_wb_inst_vector;
 
     always @(posedge clk) begin
         if (!rst_n) begin
@@ -107,6 +110,7 @@ module mem_wb_pipline (
             int_wb_dmem_mask <= 4'b0;
             int_wb_dmem_wdata <= 32'b0;
             int_wb_dmem_rdata <= 32'b0;
+            int_wb_inst_vector <= 11'b0;
         end
         else if (flush) begin
             int_wb_mem_pc <= 32'b0;
@@ -134,6 +138,7 @@ module mem_wb_pipline (
             int_wb_dmem_mask <= 4'b0;
             int_wb_dmem_wdata <= 32'b0;
             int_wb_dmem_rdata <= 32'b0;
+            int_wb_inst_vector <= 11'b0;
         end
         else if (!stall) begin
             int_wb_mem_pc <= mem_pc;
@@ -161,6 +166,7 @@ module mem_wb_pipline (
             int_wb_dmem_mask <= mem_dmem_mask;
             int_wb_dmem_wdata <= mem_dmem_wdata;
             int_wb_dmem_rdata <= mem_dmem_rdata;
+            int_wb_inst_vector <= mem_inst_vector;
         end
     end
 
@@ -189,5 +195,6 @@ module mem_wb_pipline (
     assign wb_dmem_mask = (stall) ? 4'b0 : int_wb_dmem_mask;
     assign wb_dmem_wdata = (stall) ? 32'b0 : int_wb_dmem_wdata;
     assign wb_dmem_rdata = (stall) ? 32'b0 : int_wb_dmem_rdata;
+    assign wb_inst_vector = (stall) ? 11'b0 : int_wb_inst_vector;
 
 endmodule

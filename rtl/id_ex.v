@@ -25,6 +25,7 @@ module id_ex_pipeline(
     input wire i_arith,
     input wire i_unsigned,
     input wire [2:0] op_sell,
+    inout wire [10:0] id_inst_vector,
     
     output wire [31:0] ex_pc,
     output wire [31:0] ex_inst,
@@ -47,7 +48,8 @@ module id_ex_pipeline(
     output wire [2:0] ex_op_sell,
     output wire ex_valid,
     output wire ex_is_ebreak,
-    output wire ex_invalid_instruction
+    output wire ex_invalid_instruction,
+    output wire [10:0] ex_inst_vector
 );
 
     reg [31:0] int_ex_pc;
@@ -72,6 +74,7 @@ module id_ex_pipeline(
     reg int_ex_valid;
     reg int_ex_is_ebreak;
     reg int_ex_invalid_instruction;
+    reg [10:0] int_ex_inst_vector;
 
     always @(posedge clk ) begin
         if (!rst_n) begin
@@ -97,6 +100,7 @@ module id_ex_pipeline(
             int_ex_valid               <= 1'b0;
             int_ex_is_ebreak           <= 1'b0;
             int_ex_invalid_instruction <= 1'b0;
+            int_ex_inst_vector          <= 11'b0;
         end else if (flush) begin
             int_ex_pc                  <= 32'b0;
             int_ex_inst                <= 32'b0;
@@ -120,6 +124,7 @@ module id_ex_pipeline(
             int_ex_valid               <= 1'b0;
             int_ex_is_ebreak           <= 1'b0;
             int_ex_invalid_instruction <= 1'b0;
+            int_ex_inst_vector          <= 11'b0;
         end else if (!stall) begin
             int_ex_pc <= id_pc;
             int_ex_inst <= id_inst;
@@ -143,6 +148,7 @@ module id_ex_pipeline(
             int_ex_valid <= id_valid;
             int_ex_is_ebreak <= is_ebreak;
             int_ex_invalid_instruction <= invalid_instruction;
+            int_ex_inst_vector          <= id_inst_vector;
         end
     end
 
@@ -168,5 +174,6 @@ module id_ex_pipeline(
     assign ex_valid = (stall) ? 1'b0  : int_ex_valid;
     assign ex_is_ebreak = (stall) ? 1'b0  : int_ex_is_ebreak;
     assign ex_invalid_instruction = (stall) ? 1'b0  : int_ex_invalid_instruction;
+    assign ex_inst_vector = (stall) ? 11'b0 : int_ex_inst_vector;
 
 endmodule
