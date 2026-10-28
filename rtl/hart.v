@@ -59,6 +59,13 @@ module hart #(
     // calculate the final value of the `lh[u]` instruction, shift the rdata
     // word right by 16 bits and sign/zero extend as appropriate.
     //
+    output wire [31:0] o_retire_dmem_addr,
+    output wire        o_retire_dmem_ren,
+    output wire        o_retire_dmem_wen,
+    output wire [ 3:0] o_retire_dmem_mask,
+    output wire [31:0] o_retire_dmem_wdata,
+    output wire [31:0] o_retire_dmem_rdata,
+
     // To perform a byte write at address 0x00002003, align `o_dmem_addr` to
     // `0x00002000`, assert `o_dmem_wen`, and set the mask to 0b1000 to
     // indicate that only the upper byte should be written. On the next clock
@@ -234,12 +241,25 @@ module hart #(
     wire stall_ex_mem, stall_id_ex, stall_mem_wb;
     wire clear_ex_mem, clear_id_ex, clear_mem_wb;
 
+    wire [31:0] dmem_addr_wire;
+    wire        dmem_ren_wire;
+    wire        dmem_wen_wire;
+    wire [ 3:0] dmem_mask_wire;
+    wire [31:0] dmem_wdata_wire;
+
+    wire [31:0] wb_dmem_addr;
+    wire        wb_dmem_ren;
+    wire        wb_dmem_wen;
+    wire [ 3:0] wb_dmem_mask;
+    wire [31:0] wb_dmem_wdata;
+    wire [31:0] wb_dmem_rdata;
+
     fetch #(
         .RESET_ADDR(RESET_ADDR)
     ) fetch_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
-        .stall(stall_pc),
+        .stall(stall_if_id),
         .redirect(ex_redirect),
         .next_pc(ex_next_pc),
         .current_pc(pc),
@@ -262,9 +282,6 @@ module hart #(
         .id_inst(id_inst),
         .id_valid(id_valid)
     );
-
-    // Hold Fetch whenever IF/ID is stalled.
-    assign stall_pc = stall_if_id;
 
     decode decode_inst (
         .clk(i_clk),
@@ -436,13 +453,19 @@ module hart #(
         .mem_valid(mem_valid),
         .i_rst(i_rst),
         .load_data(load_data),
-        .o_dmem_addr(o_dmem_addr),
-        .o_dmem_mask(o_dmem_mask),
-        .o_dmem_wdata(o_dmem_wdata),
-        .o_dmem_ren(o_dmem_ren),
-        .o_dmem_wen(o_dmem_wen),
+        .o_dmem_addr(dmem_addr_wire),
+        .o_dmem_mask(dmem_mask_wire),
+        .o_dmem_wdata(dmem_wdata_wire),
+        .o_dmem_ren(dmem_ren_wire),
+        .o_dmem_wen(dmem_wen_wire),
         .memory_misaligned(memory_misaligned)
     );
+
+    assign o_dmem_addr  = dmem_addr_wire;
+    assign o_dmem_ren   = dmem_ren_wire;
+    assign o_dmem_wen   = dmem_wen_wire;
+    assign o_dmem_wdata = dmem_wdata_wire;
+    assign o_dmem_mask  = dmem_mask_wire;
 
     mem_wb_pipline mem_wb_inst (
         .clk(i_clk),
@@ -468,6 +491,12 @@ module hart #(
         .mem_valid(mem_valid),
         .mem_is_ebreak(mem_is_ebreak),
         .mem_trap(mem_trap),
+        .mem_dmem_addr(dmem_addr_wire),
+        .mem_dmem_ren(dmem_ren_wire),
+        .mem_dmem_wen(dmem_wen_wire),
+        .mem_dmem_mask(dmem_mask_wire),
+        .mem_dmem_wdata(dmem_wdata_wire),
+        .mem_dmem_rdata(i_dmem_rdata),
         .wb_mem_pc(wb_mem_pc),
         .wb_pc_rslt(wb_pc_rslt),
         .wb_imm(wb_imm),
@@ -486,7 +515,13 @@ module hart #(
         .wb_writes_rd(wb_writes_rd),
         .wb_valid(wb_valid),
         .wb_is_ebreak(wb_is_ebreak),
-        .wb_trap(wb_trap)
+        .wb_trap(wb_trap),
+        .wb_dmem_addr(wb_dmem_addr),
+        .wb_dmem_ren(wb_dmem_ren),
+        .wb_dmem_wen(wb_dmem_wen),
+        .wb_dmem_mask(wb_dmem_mask),
+        .wb_dmem_wdata(wb_dmem_wdata),
+        .wb_dmem_rdata(wb_dmem_rdata)
     );
 
     assign mem_trap = mem_invalid_instruction || memory_misaligned;
@@ -532,6 +567,7 @@ module hart #(
         .o_trap(hazard_trap)
     );
 
+    // the old write back shnegengais
     assign wb_rd_data =
         wb_is_lui ? wb_imm :
         (wb_is_jal || wb_is_jalr) ?
@@ -562,26 +598,28 @@ module hart #(
     wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
     wire wb_uses_rs2 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011);
 
-    assign o_retire_valid       = wb_valid;
-    //Changed from instruction to wb_inst after passing through all pipes
-    assign o_retire_inst        = wb_inst;
-    // TODO: do we pass through iligal isncutions all the way torugh or do we isnert noop? ALex-> I think it should be like we pass it all the way through
-    assign o_retire_trap        = wb_trap;
-    assign o_retire_halt        = wb_is_ebreak;
-    //TODO: Change from instruction[19:15] to wb_rs1_addr and instruction[24:20] to wb_rs2_addr after passing through the fetch pipe
+    assign o_retire_valid = wb_valid;
+    assign o_retire_inst = wb_inst;
+    assign o_retire_trap = wb_trap;
+    assign o_retire_halt = wb_is_ebreak;
     assign o_retire_rs1_raddr = wb_uses_rs1 ? wb_rs1_addr : 5'd0;
     assign o_retire_rs2_raddr = wb_uses_rs2 ? wb_rs2_addr : 5'd0;
-    //Changed rs1_data and rs2_data to ex_reg_data_1 and ex_reg_data_2 after passing through all pipes
     assign o_retire_rs1_rdata = wb_rs1_data;
     assign o_retire_rs2_rdata = wb_rs2_data;
 
     wire reg_write_allowed = wb_regwrite;
-    //TODO: Change from rd_waddr to wb_write_dad_addrs after passing through the mem pipe
-    assign o_retire_rd_waddr  = reg_write_allowed ? wb_write_dad_addrs : 5'd0;
+    assign o_retire_rd_waddr = reg_write_allowed ? wb_write_dad_addrs : 5'd0;
 
     assign o_retire_rd_wdata  = wb_rd_data;
-    assign o_retire_pc        = wb_mem_pc;
-    assign o_retire_next_pc   = wb_pc_rslt;
+    assign o_retire_pc = wb_mem_pc;
+    assign o_retire_next_pc = wb_pc_rslt;
+
+    assign o_retire_dmem_addr = wb_dmem_addr;
+    assign o_retire_dmem_ren = wb_dmem_ren;
+    assign o_retire_dmem_wen = wb_dmem_wen;
+    assign o_retire_dmem_mask = wb_dmem_mask;
+    assign o_retire_dmem_wdata = wb_dmem_wdata;
+    assign o_retire_dmem_rdata = wb_dmem_rdata;
 
 endmodule
 
