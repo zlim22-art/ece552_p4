@@ -124,20 +124,20 @@ assign pc_hazzard       = pc_hazzard_in_ex;
 // RAW hazard stall control
 //assign stall_if_id  = RAW_hazzard || mem_hazard;
 //assign stall_if_id    = RAW_hazzard || mem_hazard;
-assign stall_id_ex  = 1'b0;
+assign stall_id_ex  =RAW_hazzard || mem_hazard;
 assign stall_if_id    = 1'b0;
 
 assign stall_ex_mem = 1'b0;
 assign stall_mem_wb = 1'b0;
 
 // pc control clearing
-assign clear_if_id  = ebreak_triggered || (ex_redirect && pc_hazzard);
-assign clear_id_ex  = (ex_redirect && pc_hazzard) || ebreak_triggered;
+assign clear_if_id  =   (ex_redirect && pc_hazzard);
+assign clear_id_ex  = (ex_redirect && pc_hazzard) ;
 
 // Ebreak clears the pipeline stages if the program is over
-assign clear_ex_mem = ebreak_triggered; 
-assign clear_mem_wb = ebreak_triggered; 
+assign clear_ex_mem = 1'b0; 
+assign clear_mem_wb = 1'b0; 
 
-assign o_trap = (~|ex_mem_flgs && ~|mem_wb_flgs) && ebreak_triggered;
+assign o_trap = wb_inst_vector[10];
 
 endmodule

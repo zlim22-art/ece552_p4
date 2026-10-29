@@ -96,6 +96,10 @@ module hart #(
     // Asserted if the instruction produced a trap, due to an illegal
     // instruction, unaligned data memory access, or unaligned instruction
     // address on a taken branch or jump.
+
+
+
+
     output wire        o_retire_trap,
     // Asserted if the instruction is an `ebreak` instruction used to halt the
     // processor. This is used for debugging and testing purposes to end
@@ -617,7 +621,7 @@ module hart #(
         (wb_rd_addr != 5'd0);
 
     assign ex_regwrite =
-        wb_valid &&
+        ex_valid &&
         !ex_invalid_instruction &&
         (ex_is_rtype ||
         ex_is_itype ||

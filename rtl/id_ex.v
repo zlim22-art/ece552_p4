@@ -154,6 +154,10 @@ module id_ex_pipeline(
             ex_invalid_instruction <= invalid_instruction;
             ex_inst_vector         <= id_inst_vector;
         end
+
+
+
+         
     end
 
 endmodule
