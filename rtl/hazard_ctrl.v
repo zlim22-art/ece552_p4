@@ -122,8 +122,10 @@ assign pc_hazzard_in_ex = valid_ex && (ex_mem_flgs[3] || ex_mem_flgs[5]);
 assign pc_hazzard       = pc_hazzard_in_ex;
 
 // RAW hazard stall control
-assign stall_if_id  = RAW_hazzard || mem_hazard;
-assign stall_id_ex  = RAW_hazzard || mem_hazard;
+//assign stall_if_id  = RAW_hazzard || mem_hazard;
+//assign stall_if_id    = RAW_hazzard || mem_hazard;
+assign stall_id_ex  = 1'b0;
+assign stall_if_id    = 1'b0;
 
 assign stall_ex_mem = 1'b0;
 assign stall_mem_wb = 1'b0;

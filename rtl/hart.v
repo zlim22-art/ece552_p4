@@ -170,6 +170,7 @@ module hart #(
     wire [31:0] ex_rs2_data;
     wire [4:0] ex_rs1_addr;
     wire [4:0] ex_rs2_addr;
+    wire [4:0] ex_rd_addr;
     wire ex_is_auipc;
     wire ex_is_jal;
     wire ex_is_jalr;
@@ -192,13 +193,14 @@ module hart #(
     wire ex_redirect_raw;
     wire ex_redirect;
     wire [31:0] mem_pc;
-    wire [31:0] mem_inst_word; // Renamed to avoid collision with module instance mem_inst
+    wire [31:0] mem_inst_word; 
     wire [31:0] mem_imm;
     wire [31:0] mem_rs1_data;
     wire [31:0] mem_rs2_data;
     wire [31:0] mem_alu_result;
     wire [4:0] mem_rs1_addr;
     wire [4:0] mem_rs2_addr;
+    wire [4:0] mem_rd_addr;
     wire [31:0] mem_next_pc;
     wire mem_is_auipc;
     wire mem_is_jal;
@@ -221,8 +223,8 @@ module hart #(
     wire [4:0] wb_write_dad_addrs;
     wire [4:0] wb_rs1_addr;
     wire [4:0] wb_rs2_addr;
-    wire [31:0] wb_rs1_data; // Explicit 32-bit width
-    wire [31:0] wb_rs2_data; // Explicit 32-bit width
+    wire [31:0] wb_rs1_data; 
+    wire [31:0] wb_rs2_data; 
     wire wb_is_lui;
     wire wb_is_jal;
     wire wb_is_jalr;
@@ -370,6 +372,10 @@ module hart #(
         .ex_inst_vector(ex_inst_vector)
     );
 
+    assign ex_rd_addr  = ex_inst[11:7];
+    assign ex_rs1_addr = ex_inst[19:15];
+    assign ex_rs2_addr = ex_inst[24:20];
+
     execute execute_inst (
         .alu_opsel(ex_op_sell),
         .alu_sub(ex_i_sub),
@@ -423,9 +429,8 @@ module hart #(
         .ex_valid(ex_valid),
         .ex_is_ebreak(ex_is_ebreak),
         .ex_invalid_instruction(ex_invalid_instruction),
-        .ex_rs1_addr(ex_inst[19:15]),
-        .ex_rs2_addr(ex_inst[24:20]),
-        // Piping flags through EX->MEM pipeline
+        .ex_rs1_addr(ex_rs1_addr),
+        .ex_rs2_addr(ex_rs2_addr),
         .ex_flag(ex_flag),
         .mem_flag(ex_mem_flgs),
         .mem_pc(mem_pc),
@@ -449,6 +454,8 @@ module hart #(
         .mem_next_pc(mem_next_pc),
         .mem_rs1_addr(mem_rs1_addr),
         .mem_rs2_addr(mem_rs2_addr),
+        .mem_rd_addr(mem_rd_addr),
+        .ex_rd_addr(ex_rd_addr),
         .mem_inst_vector(mem_inst_vector)
     );
 
@@ -463,7 +470,7 @@ module hart #(
         .is_store(mem_is_store),
         .illegal_instruction(mem_invalid_instruction),
         .mem_valid(mem_valid),
-        .i_rst(i_rst),
+        .i_rst(~i_rst),
         .load_data(load_data),
         .o_dmem_addr(dmem_addr_wire),
         .o_dmem_mask(dmem_mask_wire),
@@ -487,7 +494,6 @@ module hart #(
         .rst_n(~i_rst),
         .flush(clear_mem_wb),
         .stall(stall_mem_wb),
-        // Piping flags through MEM->WB pipeline
         .mem_flag(ex_mem_flgs),
         .wb_flag(mem_wb_flgs),
         .mem_pc(mem_pc),
@@ -496,7 +502,7 @@ module hart #(
         .load_rslt(load_data),
         .alu_result(mem_alu_result),
         .mem_inst(mem_inst_word),
-        .write_dad_addrs(mem_inst_word[11:7]),
+        .write_dad_addrs(mem_rd_addr),
         .mem_rs1_addr(mem_rs1_addr),
         .mem_rs2_addr(mem_rs2_addr),
         .mem_rs1_data(mem_rs1_data),
@@ -554,7 +560,7 @@ module hart #(
         mem_is_auipc ||
         mem_is_jal ||
         mem_is_jalr) &&
-        (mem_inst_word[11:7] != 5'd0);
+        (mem_rd_addr != 5'd0);
     
     assign valid_id = id_valid;
     hazard_ctrl hazard_ctrl_inst (
@@ -580,8 +586,8 @@ module hart #(
         .ex_mem_flgs(ex_mem_flgs),
         .mem_wb_flgs(mem_wb_flgs),
         .ebreak_triggered(is_ebreak),
-        .ex_rd_addr(ex_inst[11:7]),
-        .mem_rd_addr(mem_inst_word[11:7]),
+        .ex_rd_addr(ex_rd_addr),
+        .mem_rd_addr(mem_rd_addr),
         .wb_rd_addr(wb_rd_addr),
         .ex_redirect(ex_redirect),
         .stall_ex_mem(stall_ex_mem),
@@ -595,7 +601,6 @@ module hart #(
         .o_trap(hazard_trap)
     );
 
-    // the old write back shnegengais
     assign wb_rd_data =
         wb_is_lui ? wb_imm :
         (wb_is_jal || wb_is_jalr) ?
@@ -621,7 +626,7 @@ module hart #(
         ex_is_auipc ||
         ex_is_jal ||
         ex_is_jalr) &&
-        (ex_inst[11:7] != 5'd0);
+        (ex_rd_addr != 5'd0);
 
     wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
     wire wb_uses_rs2 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011);

@@ -11,27 +11,27 @@ module if_id_pipline(
     output reg id_valid
 );
 
-
     always @(posedge clk) begin
         if(!rst_n) begin
             id_pc <= 32'b0;
-            id_inst <= 32'h00000013;
+            id_inst <= 32'h00000000;
             id_valid <= 1'b0;
         end
         else if (flush) begin
             id_pc <= 32'b0;
-            id_inst <= 32'h00000013;
+            id_inst <= 32'h00000000;
             id_valid <= 1'b0;
         end
-        else if (!stall)begin
+        else if (stall)begin
+            id_pc <= id_pc;
+            id_inst <= id_inst;
+            id_valid <= id_valid;
+        end else begin  // stalling 
             id_pc <= if_pc;
             id_inst <= if_inst;
             id_valid <= if_valid;
         end
 
-        assign id_pc = (stall) ? 32'b0 : id_pc;
-        assign id_inst = (stall) ? 32'h00000013 : id_inst;
-        assign id_valid = (stall) ? 1'b0 : id_valid;
 
     end
 
