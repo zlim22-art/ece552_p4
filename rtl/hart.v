@@ -142,8 +142,12 @@ module hart #(
     ,`RVFI_OUTPUTS
 `endif
 );
-    
+    // fetch
     wire [31:0] pc;
+    wire [31:0] if_inst;
+    wire if_valid;
+
+    // decode stage signals
     wire [31:0] pc_plus4;
     wire [31:0] rs1_data, rs2_data, imm;
     wire is_rtype, is_itype_alu, is_load, is_store, is_branch;
@@ -151,23 +155,22 @@ module hart #(
     wire [2:0]  alu_opsel;
     wire alu_sub, alu_unsigned, alu_arith;
     wire is_ebreak;
-    wire [31:0] alu_result;
-    wire alu_eq, alu_slt, alu_n, alu_z, alu_v, alu_c;
-    wire [31:0] load_data;
-    wire memory_misaligned;
-    wire [31:0] if_inst;
+    
     wire [31:0] id_pc;
     wire [31:0] id_inst;
     wire [4:0]  id_rs1_addr;
     wire [4:0]  id_rs2_addr;
-    wire stall_pc;
-    wire freeze_pc;
-    wire stall_if_id;
-    wire if_valid;
+    
     wire id_valid;
-    wire [31:0] ex_next_pc;
     wire [5:0] id_flags;
     wire invalid_instruction;
+    wire [10:0] id_inst_vector;
+
+    // execute stage signals
+    wire [31:0] alu_result;
+    wire alu_eq, alu_slt, alu_n, alu_z, alu_v, alu_c;
+
+    wire [31:0] ex_next_pc;
     wire [31:0] ex_pc;
     wire [31:0] ex_inst;
     wire [31:0] ex_imm;
@@ -192,11 +195,16 @@ module hart #(
     wire ex_i_arith;
     wire ex_i_unsigned;
     wire [2:0] ex_op_sell;
+    wire ex_regwrite;
     wire ex_valid;
     wire ex_is_ebreak;
     wire ex_invalid_instruction;
     wire ex_redirect_raw;
     wire ex_redirect;
+
+    // memory stage signals
+    wire [31:0] load_data;
+
     wire [31:0] mem_pc;
     wire [31:0] mem_inst_word; 
     wire [31:0] mem_imm;
@@ -216,9 +224,19 @@ module hart #(
     wire mem_is_rtype;
     wire mem_is_itype;
     wire mem_is_lui;
+    wire mem_regwrite;
+    wire memory_misaligned;
+    wire mem_trap;
     wire mem_valid;
     wire mem_is_ebreak;
     wire mem_invalid_instruction;
+    wire [31:0] dmem_addr_wire;
+    wire dmem_ren_wire;
+    wire dmem_wen_wire;
+    wire [3:0] dmem_mask_wire;
+    wire [31:0] dmem_wdata_wire;
+
+    // write-back stage signals
     wire [31:0] wb_mem_pc;
     wire [31:0] wb_pc_rslt;
     wire [31:0] wb_imm;
@@ -241,28 +259,24 @@ module hart #(
     wire [4:0] wb_rd_addr;
     wire [31:0] wb_rd_data;
     wire wb_regwrite;
-    wire mem_regwrite;
-    wire mem_trap;
-    wire ex_regwrite;
-    wire hazard_trap;
-    wire valid_id;
+    wire [31:0] wb_dmem_addr;
+    wire wb_dmem_ren;
+    wire wb_dmem_wen;
+    wire [3:0] wb_dmem_mask;
+    wire [31:0] wb_dmem_wdata;
+    wire [31:0] wb_dmem_rdata;
+    wire [10:0] wb_inst_vector;
 
+    // hazard control signals
+    wire valid_id;
+    wire hazard_trap;
+    wire stall_pc;
+    wire freeze_pc;
+    wire stall_if_id;
     wire stall_ex_mem, stall_id_ex, stall_mem_wb;
     wire clear_ex_mem, clear_id_ex, clear_if_id, clear_mem_wb;
 
-    wire [31:0] dmem_addr_wire;
-    wire        dmem_ren_wire;
-    wire        dmem_wen_wire;
-    wire [ 3:0] dmem_mask_wire;
-    wire [31:0] dmem_wdata_wire;
-
-    wire [31:0] wb_dmem_addr;
-    wire        wb_dmem_ren;
-    wire        wb_dmem_wen;
-    wire [ 3:0] wb_dmem_mask;
-    wire [31:0] wb_dmem_wdata;
-    wire [31:0] wb_dmem_rdata;
-
+    // fetch stage instance
     fetch #(
         .RESET_ADDR(RESET_ADDR)
     ) fetch_inst (
@@ -279,19 +293,24 @@ module hart #(
     assign if_inst = i_imem_rdata;
     assign if_valid = !i_rst;
 
+    // if-id pipeline instance
     if_id_pipline if_id_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
-        .stall(stall_if_id),
-        .flush(clear_if_id),
+        
         .if_pc(pc),
         .if_inst(if_inst),
         .if_valid(if_valid),
+
         .id_pc(id_pc),
         .id_inst(id_inst),
-        .id_valid(id_valid)
+        .id_valid(id_valid),
+
+        .stall(stall_if_id),
+        .flush(clear_if_id)
     );
-    wire [10:0] id_inst_vector;
+
+    // decode stage instance
     decode decode_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
@@ -323,13 +342,13 @@ module hart #(
         .inst_vector(id_inst_vector)
     );
 
+    // id-ex pipeline instance
     wire [10:0] ex_inst_vector;
     id_ex_pipeline id_ex_inst (
         .id_inst_vector(id_inst_vector),
         .clk(i_clk),
         .rst_n(~i_rst),
-        .flush(clear_id_ex),
-        .stall(stall_id_ex),
+        
         .id_pc(id_pc),
         .id_inst(id_inst),
         .id_valid(id_valid),
@@ -352,6 +371,7 @@ module hart #(
         .op_sell(alu_opsel),
         .is_ebreak(is_ebreak),
         .invalid_instruction(invalid_instruction),
+
         .ex_pc(ex_pc),
         .ex_inst(ex_inst),
         .ex_imm(ex_imm),
@@ -374,13 +394,13 @@ module hart #(
         .ex_valid(ex_valid),
         .ex_is_ebreak(ex_is_ebreak),
         .ex_invalid_instruction(ex_invalid_instruction),
-        .ex_inst_vector(ex_inst_vector)
+        .ex_inst_vector(ex_inst_vector),
+
+        .flush(clear_id_ex),
+        .stall(stall_id_ex)
     );
 
-    assign ex_rd_addr  = ex_inst[11:7];
-    assign ex_rs1_addr = ex_inst[19:15];
-    assign ex_rs2_addr = ex_inst[24:20];
-
+    // execute stage instance
     execute execute_inst (
         .alu_opsel(ex_op_sell),
         .alu_sub(ex_i_sub),
@@ -408,13 +428,18 @@ module hart #(
         .ex_redirect(ex_redirect_raw)
     );
 
+    assign ex_redirect = ex_valid && ex_redirect_raw;
+    assign ex_rd_addr = ex_inst[11:7];
+    assign ex_rs1_addr = ex_inst[19:15];
+    assign ex_rs2_addr = ex_inst[24:20];
+
+    // ex-mem pipeline instance
     wire [10:0] mem_inst_vector;
     ex_mem_pipeline ex_mem_inst (
         .ex_inst_vector(ex_inst_vector),
         .clk(i_clk),
         .rst_n(~i_rst),
-        .flush(clear_ex_mem),
-        .stall(stall_ex_mem),
+        
         .ex_pc(ex_pc),
         .ex_inst(ex_inst),
         .ex_imm(ex_imm),
@@ -437,6 +462,8 @@ module hart #(
         .ex_rs1_addr(ex_rs1_addr),
         .ex_rs2_addr(ex_rs2_addr),
         .ex_flag(ex_flag),
+        .ex_rd_addr(ex_rd_addr),
+
         .mem_flag(ex_mem_flgs),
         .mem_pc(mem_pc),
         .mem_inst(mem_inst_word),
@@ -460,12 +487,13 @@ module hart #(
         .mem_rs1_addr(mem_rs1_addr),
         .mem_rs2_addr(mem_rs2_addr),
         .mem_rd_addr(mem_rd_addr),
-        .ex_rd_addr(ex_rd_addr),
-        .mem_inst_vector(mem_inst_vector)
+        .mem_inst_vector(mem_inst_vector),
+
+        .flush(clear_ex_mem),
+        .stall(stall_ex_mem)
     );
 
-    assign ex_redirect = ex_valid && ex_redirect_raw;
-
+    // memory stage instance
     mem mem_inst (
         .i_dmem_rdata(i_dmem_rdata),
         .rs2_data(mem_rs2_data),
@@ -485,20 +513,31 @@ module hart #(
         .memory_misaligned(memory_misaligned)
     );
 
-    assign o_dmem_addr  = dmem_addr_wire;
-    assign o_dmem_ren   = dmem_ren_wire;
-    assign o_dmem_wen   = dmem_wen_wire;
-    assign o_dmem_wdata = dmem_wdata_wire;
-    assign o_dmem_mask  = dmem_mask_wire;
+    assign mem_trap = mem_invalid_instruction || memory_misaligned;
 
-    wire [10:0] wb_inst_vector;
+    assign mem_regwrite = mem_valid &&
+        !mem_trap &&
+        (mem_is_rtype ||
+        mem_is_itype ||
+        mem_is_load ||
+        mem_is_lui ||
+        mem_is_auipc ||
+        mem_is_jal ||
+        mem_is_jalr) &&
+        (mem_rd_addr != 5'd0);
+
+    assign o_dmem_addr = dmem_addr_wire;
+    assign o_dmem_ren = dmem_ren_wire;
+    assign o_dmem_wen = dmem_wen_wire;
+    assign o_dmem_wdata = dmem_wdata_wire;
+    assign o_dmem_mask = dmem_mask_wire;
     
+    // mem-wb pipeline instance
     mem_wb_pipline mem_wb_inst (
         .mem_inst_vector(mem_inst_vector),
         .clk(i_clk),
         .rst_n(~i_rst),
-        .flush(clear_mem_wb),
-        .stall(stall_mem_wb),
+        
         .mem_flag(ex_mem_flgs),
         .wb_flag(mem_wb_flgs),
         .mem_pc(mem_pc),
@@ -526,6 +565,7 @@ module hart #(
         .mem_dmem_mask(dmem_mask_wire),
         .mem_dmem_wdata(dmem_wdata_wire),
         .mem_dmem_rdata(i_dmem_rdata),
+
         .wb_mem_pc(wb_mem_pc),
         .wb_pc_rslt(wb_pc_rslt),
         .wb_imm(wb_imm),
@@ -551,50 +591,52 @@ module hart #(
         .wb_dmem_mask(wb_dmem_mask),
         .wb_dmem_wdata(wb_dmem_wdata),
         .wb_dmem_rdata(wb_dmem_rdata),
-        .wb_inst_vector(wb_inst_vector)
+        .wb_inst_vector(wb_inst_vector),
+
+        .flush(clear_mem_wb),
+        .stall(stall_mem_wb)
     );
-
-    assign mem_trap = mem_invalid_instruction || memory_misaligned;
-
-    assign mem_regwrite = mem_valid &&
-        !mem_trap &&
-        (mem_is_rtype ||
-        mem_is_itype ||
-        mem_is_load ||
-        mem_is_lui ||
-        mem_is_auipc ||
-        mem_is_jal ||
-        mem_is_jalr) &&
-        (mem_rd_addr != 5'd0);
     
     assign valid_id = id_valid;
+
+    // hazard control instance
     hazard_ctrl hazard_ctrl_inst (
         .clk(i_clk),
+
+        // from ID stage
         .rs1_addr(id_inst[19:15]),
         .rs2_addr(id_inst[24:20]),
         .id_inst_vector(id_inst_vector),
-        .ex_inst_vector(ex_inst_vector),
-        .mem_inst_vector(mem_inst_vector),
-        .wb_inst_vector(wb_inst_vector),
         .valid_id(valid_id),
-        .valid_ex(ex_valid),
-        .valid_mem(mem_valid),
-        .valid_wb(wb_valid),
         .is_load(is_load),
         .is_store(is_store),
+        .id_flags(id_flags),
+        .ebreak_triggered(is_ebreak),
+
+        // from EX stage
+        .ex_inst_vector(ex_inst_vector),
+        .valid_ex(ex_valid),
         .ex_is_load(ex_is_load),
         .ex_is_store(ex_is_store),
+        .id_ex_flgs(ex_flag),
+        .ex_rd_addr(ex_rd_addr),
+        .ex_redirect(ex_redirect),
+
+        // from MEM stage
+        .mem_inst_vector(mem_inst_vector),
+        .valid_mem(mem_valid),
         .mem_is_load(mem_is_load),
         .mem_is_store(mem_is_store),
-        .id_flags(id_flags),
-        .id_ex_flgs(ex_flag),
         .ex_mem_flgs(ex_mem_flgs),
-        .mem_wb_flgs(mem_wb_flgs),
-        .ebreak_triggered(is_ebreak),
-        .ex_rd_addr(ex_rd_addr),
         .mem_rd_addr(mem_rd_addr),
+
+        // from WB stage
+        .wb_inst_vector(wb_inst_vector),
+        .valid_wb(wb_valid),
+        .mem_wb_flgs(mem_wb_flgs),
         .wb_rd_addr(wb_rd_addr),
-        .ex_redirect(ex_redirect),
+        
+        // control signals
         .freeze_pc(freeze_pc),
         .stall_ex_mem(stall_ex_mem),
         .stall_id_ex(stall_id_ex),
@@ -634,6 +676,8 @@ module hart #(
         ex_is_jalr) &&
         (ex_rd_addr != 5'd0);
 
+    
+    // retire stage signals
     wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
     wire wb_uses_rs2 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011);
 
