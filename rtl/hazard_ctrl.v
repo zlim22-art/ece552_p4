@@ -1,6 +1,6 @@
 module hazard_ctrl(
     input wire clk,
-    // These come straight from the fetch stage
+    // Source register addresses from the ID stage
     input wire [4:0] rs1_addr,
     input wire [4:0] rs2_addr,
 
@@ -26,7 +26,7 @@ module hazard_ctrl(
     input wire [4:0] mem_rd_addr,
     input wire [4:0] wb_rd_addr,
 
-    // Added back load/store explicit ports to match hart.v instantiation
+    // Load/store explicit ports to match hart.v instantiation
     input wire is_load,
     input wire is_store,
     input wire ex_is_load,
@@ -37,6 +37,7 @@ module hazard_ctrl(
     input wire ebreak_triggered,
     input wire ex_redirect,
 
+    output wire freeze_pc,
     output wire stall_ex_mem,
     output wire stall_id_ex,
     output wire stall_if_id,
@@ -51,15 +52,16 @@ module hazard_ctrl(
 
 wire uses_rs1;
 wire uses_rs2;
-wire writes_ahead;
+wire ex_writes_rd;
+wire mem_writes_rd;
+wire wb_writes_rd;
 wire mem_hazard;
 wire RAW_hazzard;
 wire RAW_hazzard_in_ex;
 wire RAW_hazzard_in_mem;
+wire RAW_hazzard_in_wb;
 wire pc_hazzard;
-wire pc_hazzard_in_ex;
 
-// Declared missing wires
 wire reading_from_memory;
 wire writing_to_memory;
 
@@ -79,65 +81,82 @@ wire writing_to_memory;
     };
 */
 
-// Whether the current instruction is using rs1 or rs2 
+// Whether the current instruction in ID uses rs1 or rs2 
 assign uses_rs1 = valid_id && (id_inst_vector[10] || id_inst_vector[9] || id_inst_vector[8] || 
                                id_inst_vector[7]  || id_inst_vector[6] || id_inst_vector[4]);
 
 assign uses_rs2 = valid_id && (id_inst_vector[10] || id_inst_vector[7] || id_inst_vector[6]);
 
-// Writes ahead guarded by valid_ex and valid_mem
-wire ex_writes_rd  = valid_ex && (ex_inst_vector[10] || ex_inst_vector[9] || ex_inst_vector[8] || 
-                                  ex_inst_vector[5]  || ex_inst_vector[4] || ex_inst_vector[3] || 
-                                  ex_inst_vector[2]);
+// Whether instructions in EX, MEM, or WB write to rd
+assign ex_writes_rd  = valid_ex && (ex_inst_vector[10] || ex_inst_vector[9] || ex_inst_vector[8] || 
+                                    ex_inst_vector[5]  || ex_inst_vector[4] || ex_inst_vector[3] || 
+                                    ex_inst_vector[2]);
 
-wire mem_writes_rd = valid_mem && (mem_inst_vector[10] || mem_inst_vector[9] || mem_inst_vector[8] || 
-                                   mem_inst_vector[5]  || mem_inst_vector[4]  || mem_inst_vector[3]  || 
-                                   mem_inst_vector[2]);
+assign mem_writes_rd = valid_mem && (mem_inst_vector[10] || mem_inst_vector[9] || mem_inst_vector[8] || 
+                                     mem_inst_vector[5]  || mem_inst_vector[4] || mem_inst_vector[3] || 
+                                     mem_inst_vector[2]);
 
-assign writes_ahead = (ex_writes_rd && (ex_rd_addr != 5'b0)) || 
-                      (mem_writes_rd && (mem_rd_addr != 5'b0));
+assign wb_writes_rd  = valid_wb && (wb_inst_vector[10] || wb_inst_vector[9] || wb_inst_vector[8] || 
+                                    wb_inst_vector[5]  || wb_inst_vector[4] || wb_inst_vector[3] || 
+                                    wb_inst_vector[2]);
 
-// RAW hazard detection in the EX and MEM stages
-assign RAW_hazzard_in_ex = (uses_rs1 && writes_ahead) &&
-                          ((|rs1_addr && rs1_addr == ex_rd_addr) || 
-                           (|rs2_addr && rs2_addr == ex_rd_addr));
+// RAW hazard detection in EX, MEM, and WB stages
+assign RAW_hazzard_in_ex  = ex_writes_rd && (ex_rd_addr != 5'd0) &&
+                            ((uses_rs1 && (rs1_addr == ex_rd_addr)) || 
+                             (uses_rs2 && (rs2_addr == ex_rd_addr)));
 
-assign RAW_hazzard_in_mem = (uses_rs1 && writes_ahead) && 
-                           ((|rs1_addr && rs1_addr == mem_rd_addr) ||
-                            (|rs2_addr && rs2_addr == mem_rd_addr));
+assign RAW_hazzard_in_mem = mem_writes_rd && (mem_rd_addr != 5'd0) && 
+                            ((uses_rs1 && (rs1_addr == mem_rd_addr)) ||
+                             (uses_rs2 && (rs2_addr == mem_rd_addr)));
 
-assign RAW_hazzard = RAW_hazzard_in_ex || RAW_hazzard_in_mem;
+assign RAW_hazzard_in_wb  = wb_writes_rd && (wb_rd_addr != 5'd0) && 
+                            ((uses_rs1 && (rs1_addr == wb_rd_addr)) ||
+                             (uses_rs2 && (rs2_addr == wb_rd_addr)));
+
+assign RAW_hazzard = RAW_hazzard_in_ex || RAW_hazzard_in_mem || RAW_hazzard_in_wb;
 
 // Memory hazard detection guarded by valid signals
 assign reading_from_memory = valid_id && (id_inst_vector[8] || id_inst_vector[7]);
 assign writing_to_memory   = valid_id && (id_inst_vector[8] || id_inst_vector[7]);
 
-assign mem_hazard = reading_from_memory && (
-                    (valid_ex  && (ex_inst_vector[8]  || ex_inst_vector[7])  && |ex_rd_addr  && (rs1_addr == ex_rd_addr)) ||
-                    (valid_mem && (mem_inst_vector[8] || mem_inst_vector[7]) && |mem_rd_addr && (rs1_addr == mem_rd_addr))
-                    );
 
-// PC hazard detection
-assign pc_hazzard_in_ex = valid_ex && (ex_mem_flgs[3] || ex_mem_flgs[5]);
-assign pc_hazzard       = pc_hazzard_in_ex;
 
-// RAW hazard stall control
-//assign stall_if_id  = RAW_hazzard || mem_hazard;
-//assign stall_if_id    = RAW_hazzard || mem_hazard;
-assign stall_id_ex  =RAW_hazzard || mem_hazard;
-assign stall_if_id    = 1'b0;
 
+// CAse 1:  RAW
+assign mem_hazard_raw = valid_ex && ex_inst_vector[8] && (ex_rd_addr != 5'd0) && (
+                        (uses_rs1 && (rs1_addr == ex_rd_addr)) || 
+                        (uses_rs2 && (rs2_addr == ex_rd_addr))
+                        );
+
+// CASE 2: whatver is in your alu rslt is going to be the base adresss for ofeset shenegaigs.
+// if your loaidng or sotoring but your base regsiter adress iss being modfied in a prior inscution.
+assign mem_hazard_base = (id_inst_vector[8] || id_inst_vector[7]) && (
+                         (valid_ex  && ex_writes_rd  && (ex_rd_addr  != 5'd0) && (rs1_addr == ex_rd_addr)) ||
+                         (valid_mem && mem_writes_rd && (mem_rd_addr != 5'd0) && (rs1_addr == mem_rd_addr))
+                         );
+
+assign mem_hazard= mem_hazard_raw|| mem_hazard_base;
+
+
+// PC hazard (branch or jump taken in EX)
+assign pc_hazzard = valid_ex && ex_redirect;
+
+// Freeze PC and stall IF/ID during a data hazard (unless EX is redirecting the PC)
+assign freeze_pc    = (RAW_hazzard || mem_hazard) && !pc_hazzard;
+assign stall_if_id  = (RAW_hazzard || mem_hazard) && !pc_hazzard;
+assign stall_id_ex  = 1'b0;
 assign stall_ex_mem = 1'b0;
 assign stall_mem_wb = 1'b0;
 
-// pc control clearing
-assign clear_if_id  =   (ex_redirect && pc_hazzard);
-assign clear_id_ex  = (ex_redirect && pc_hazzard) ;
+// Flush IF/ID on a taken branch/jump
+assign clear_if_id  = pc_hazzard;
 
-// Ebreak clears the pipeline stages if the program is over
+// Flush ID/EX on a taken branch/jump OR when inserting a bubble for a RAW/mem hazard stall
+assign clear_id_ex  = pc_hazzard || RAW_hazzard || mem_hazard;
+
 assign clear_ex_mem = 1'b0; 
 assign clear_mem_wb = 1'b0; 
 
-assign o_trap = wb_inst_vector[10];
+assign o_trap = valid_wb && wb_inst_vector[0];
 
 endmodule

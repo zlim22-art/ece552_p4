@@ -161,6 +161,7 @@ module hart #(
     wire [4:0]  id_rs1_addr;
     wire [4:0]  id_rs2_addr;
     wire stall_pc;
+    wire freeze_pc;
     wire stall_if_id;
     wire if_valid;
     wire id_valid;
@@ -267,7 +268,7 @@ module hart #(
     ) fetch_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
-        .stall(stall_if_id),
+        .stall(freeze_pc),
         .redirect(ex_redirect),
         .next_pc(ex_next_pc),
         .current_pc(pc),
@@ -474,7 +475,7 @@ module hart #(
         .is_store(mem_is_store),
         .illegal_instruction(mem_invalid_instruction),
         .mem_valid(mem_valid),
-        .i_rst(~i_rst),
+        .i_rst(i_rst),
         .load_data(load_data),
         .o_dmem_addr(dmem_addr_wire),
         .o_dmem_mask(dmem_mask_wire),
@@ -594,6 +595,7 @@ module hart #(
         .mem_rd_addr(mem_rd_addr),
         .wb_rd_addr(wb_rd_addr),
         .ex_redirect(ex_redirect),
+        .freeze_pc(freeze_pc),
         .stall_ex_mem(stall_ex_mem),
         .stall_id_ex(stall_id_ex),
         .stall_if_id(stall_if_id),
@@ -641,8 +643,8 @@ module hart #(
     assign o_retire_halt = wb_is_ebreak;
     assign o_retire_rs1_raddr = wb_uses_rs1 ? wb_rs1_addr : 5'd0;
     assign o_retire_rs2_raddr = wb_uses_rs2 ? wb_rs2_addr : 5'd0;
-    assign o_retire_rs1_rdata = wb_rs1_data;
-    assign o_retire_rs2_rdata = wb_rs2_data;
+    assign o_retire_rs1_rdata = (wb_rs1_addr == 5'd0) ? 32'd0 : wb_rs1_data;
+    assign o_retire_rs2_rdata = (wb_rs2_addr == 5'd0) ? 32'd0 : wb_rs2_data;
 
     wire reg_write_allowed = wb_regwrite;
     assign o_retire_rd_waddr = reg_write_allowed ? wb_write_dad_addrs : 5'd0;
@@ -651,10 +653,10 @@ module hart #(
     assign o_retire_pc = wb_mem_pc;
     assign o_retire_next_pc = wb_pc_rslt;
 
-    assign o_retire_dmem_addr = wb_dmem_addr;
-    assign o_retire_dmem_ren = wb_dmem_ren;
-    assign o_retire_dmem_wen = wb_dmem_wen;
-    assign o_retire_dmem_mask = wb_dmem_mask;
+    assign o_retire_dmem_addr  = wb_dmem_addr;
+    assign o_retire_dmem_ren   = wb_dmem_ren && wb_valid && !wb_trap;
+    assign o_retire_dmem_wen   = wb_dmem_wen && wb_valid && !wb_trap;
+    assign o_retire_dmem_mask  = (wb_valid && !wb_trap) ? wb_dmem_mask : 4'b0000;
     assign o_retire_dmem_wdata = wb_dmem_wdata;
     assign o_retire_dmem_rdata = wb_dmem_rdata;
 

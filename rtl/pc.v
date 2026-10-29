@@ -16,6 +16,9 @@ module pc #(
             current_pc <= next_pc;
         else if (!stall)
             current_pc <= current_pc + 32'd4;
+        else if (stall)
+            current_pc <= current_pc;
+
     end
 
 endmodule
