@@ -23,20 +23,20 @@ module mem(
     wire [2:0] funct3;
 
     assign funct3 = instruction[14:12];
-
+    // controlling load data based on the funct3 and alu result(halfword, byte, word)
     load_cntrl load_cntrl_i (
         .i_dmem_rdata(i_dmem_rdata),
         .alu_rslt(alu_result),
         .funct3(funct3),
         .o_load_data(load_data)
     );
-
+    // controlling where data stored(offset)
     store_cntrl store_cntrl_i (
         .rs2_data(rs2_data),
         .alu_rslt(alu_result),
         .o_store_data(store_data)
     );
-
+    // checking which bytes are active for operation
     memory_mask memory_mask_i (
         .alu_rslt(alu_result),
         .funct3(funct3),

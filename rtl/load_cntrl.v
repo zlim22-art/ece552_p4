@@ -11,13 +11,13 @@ module load_cntrl (
 
     assign offset = alu_rslt[1:0];
 
-    // Pick byte using ternary mux (no dynamic bit shifts)
+    // Pick byte using complex mux 
     assign selected_byte = (offset == 2'b00) ? i_dmem_rdata[7:0]   :
                            (offset == 2'b01) ? i_dmem_rdata[15:8]  :
                            (offset == 2'b10) ? i_dmem_rdata[23:16] :
                                                i_dmem_rdata[31:24];
 
-    // Pick halfword using ternary mux (aligned to offset[1])
+    // Pick halfword using mux
     assign selected_half = offset[1] ? i_dmem_rdata[31:16] : i_dmem_rdata[15:0];
 
     always @(*) begin

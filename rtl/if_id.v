@@ -10,7 +10,7 @@ module if_id_pipline(
     output reg [31:0] id_inst,
     output reg id_valid
 );
-
+    // pipe between instruction fetch and instruction decode stage
     always @(posedge clk) begin
         if(!rst_n) begin
             id_pc <= 32'b0;

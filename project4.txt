@@ -1,0 +1,3 @@
+[Group Member 1]: Alexander Teran
+[Group Member 2]: Yash Datar
+[Group Member 3]: Aaron Lim

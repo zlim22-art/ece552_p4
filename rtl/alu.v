@@ -25,24 +25,24 @@ module alu (
     assign add_ext     = {1'b0, i_op1} + {1'b0, i_op2};
     assign add_sub_res = i_sub ? (i_op1 - i_op2) : add_ext[31:0];
 
-    // Equality & Zero
+    // zero, equality and negative flags
     assign o_eq = (i_op1 == i_op2);
     assign o_z  = (o_result == 32'b0);
     assign o_n  = o_result[31];
-
+    // for overflow
     assign o_v = (i_opsel == 3'b000) ? 
                  (i_sub ? ((i_op1[31] != i_op2[31]) && (i_op1[31] != add_sub_res[31])) 
                         : ((i_op1[31] == i_op2[31]) && (i_op1[31] != add_sub_res[31]))) 
                  : 1'b0;
-
+    // for checking carry out
     assign o_c = (i_opsel == 3'b000) ? 
                  (i_sub ? (i_op1 >= i_op2) : add_ext[32]) 
                  : 1'b0;
-
+    // for set less than
     assign o_slt = i_unsigned ? 
                    (i_op1 < i_op2) : 
                    ((i_op1[31] != i_op2[31]) ? i_op1[31] : (i_op1 < i_op2));
-
+    // shuft left 
     assign shift_left =
         (i_op2[4:0] == 5'd0)  ? i_op1 :
         (i_op2[4:0] == 5'd1)  ? {i_op1[30:0], 1'b0} :
@@ -77,7 +77,7 @@ module alu (
         (i_op2[4:0] == 5'd30) ? {i_op1[1:0], 30'b0} :
         (i_op2[4:0] == 5'd31) ? {i_op1[0], 31'b0} :
         32'b0;
-
+    // shift right
     assign shift_right =
         (i_op2[4:0] == 5'd0)  ? i_op1 :
         (i_op2[4:0] == 5'd1)  ? {{1{ i_arith ? i_op1[31] : 1'b0}}, i_op1[31:1]} :
@@ -112,7 +112,7 @@ module alu (
         (i_op2[4:0] == 5'd30) ? {{30{ i_arith ? i_op1[31] : 1'b0}}, i_op1[31:30]} :
         (i_op2[4:0] == 5'd31) ? {{31{ i_arith ? i_op1[31] : 1'b0}}, i_op1[31]} :
         32'b0;
-
+    // result assigned based on operation conducted
     assign o_result =
         (i_opsel == 3'b000)                           ? add_sub_res :
         (i_opsel == 3'b001)                           ? shift_left :

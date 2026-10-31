@@ -51,7 +51,7 @@ module id_ex_pipeline(
     output reg ex_invalid_instruction,
     output reg [10:0] ex_inst_vector
 );
-
+    //pipe between instruction decode and execute stage
     always @(posedge clk) begin
         if (!rst_n) begin
             ex_pc                  <= 32'b0;
@@ -104,7 +104,7 @@ module id_ex_pipeline(
             ex_inst_vector         <= 11'b0;
         end
         else if (stall) begin
-            // Hold current values during a stall
+            // hold current values during a stall
             ex_pc                  <= ex_pc;
             ex_inst                <= ex_inst;
             ex_imm                 <= ex_imm;

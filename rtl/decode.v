@@ -28,7 +28,7 @@ module decode (
     output wire [4:0] rs2_addr,
     output wire [10:0] inst_vector      // makes stuff esier when piping this
 );
-
+    // falg generation for cheking instruction type
     flag_gen flag_gen_inst (
         .opcode (instruction[6:0]),
         .flag (flag),
@@ -42,14 +42,14 @@ module decode (
         .is_lui (is_lui),
         .is_auipc (is_auipc)
     );
-
+    // generation of immediate
     imm immediate_gen_inst (
         .i_inst (instruction), 
         .i_format (flag),
         .o_immediate (imm) 
     );
 
-    
+    // alu control signals assignment
     alu_cntrl alu_cntrl_inst (
         .instruction (instruction),
         .o_opsel (o_opsel),
@@ -57,7 +57,7 @@ module decode (
         .o_unsigned  (o_unsigned),
         .o_arith (o_arith)
     );
-
+    // setting up register file
     rf rf_inst (
         .i_clk (clk),
         .i_rst (~rst_n),
@@ -72,7 +72,7 @@ module decode (
 
     assign rs1_addr = instruction[19:15];
     assign rs2_addr = instruction[24:20];
-    
+    // assigning ebreak address and checking if instruction is invalid
     assign is_ebreak = (instruction == 32'h00100073);
     
     assign invalid_instruction = !(is_rtype || is_itype_alu || is_load || is_store ||

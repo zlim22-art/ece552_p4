@@ -53,6 +53,7 @@ module ex_mem_pipeline(
     output reg [5:0] mem_flag        
 );
 
+    // pipe between execute and memory stage
     always @(posedge clk) begin
         if (!rst_n) begin
             mem_pc                  <= 32'b0;
@@ -134,6 +135,7 @@ module ex_mem_pipeline(
             mem_flag                <= mem_flag;
         end
         else begin
+            // pipe in updated values if not stalled or flushed
             mem_pc                  <= ex_pc;
             mem_inst                <= ex_inst;
             mem_imm                 <= ex_imm;

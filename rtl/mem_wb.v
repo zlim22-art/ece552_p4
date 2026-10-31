@@ -58,7 +58,7 @@ module mem_wb_pipline (
     output reg [10:0] wb_inst_vector,
     output reg [5:0] wb_flag          
 );
-
+    // pipe between memory and write back stage
     always @(posedge clk) begin
         if (!rst_n) begin
             wb_mem_pc            <= 32'b0;
