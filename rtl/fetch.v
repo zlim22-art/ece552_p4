@@ -6,8 +6,8 @@ module fetch #(
     input wire stall,
     input wire redirect,
     input wire [31:0] next_pc,
-    output wire [31:0] current_pc, // Changed from reg to wire (driven by pc_inst)
-    output wire [31:0] pc_plus4    // Added pc_plus4 output expected by hart.v
+    output wire [31:0] current_pc, 
+    output wire [31:0] pc_plus4
 );
 
     pc pc_inst (
@@ -19,7 +19,7 @@ module fetch #(
         .current_pc(current_pc)
     );
 
-    // Calculate PC + 4 for jumps/branches
+    // Calculating pc+4 to fetch next instruction
     assign pc_plus4 = current_pc + 32'd4;
 
 endmodule

@@ -20,7 +20,7 @@ module flag_gen (
     assign is_jalr = (opcode == 7'b1100111);
     assign is_lui = (opcode == 7'b0110111);
     assign is_auipc = (opcode == 7'b0010111);
-
+    // assigning flag based on type of instruction
     always @(*) begin
         case (opcode)
             7'b0110011: flag = 6'b000001; //R 

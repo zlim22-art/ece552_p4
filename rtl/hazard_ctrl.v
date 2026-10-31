@@ -26,7 +26,6 @@ module hazard_ctrl(
     input wire [4:0] mem_rd_addr,
     input wire [4:0] wb_rd_addr,
 
-    // Load/store explicit ports to match hart.v instantiation
     input wire is_load,
     input wire is_store,
     input wire ex_is_load,
@@ -65,21 +64,6 @@ wire pc_hazzard;
 wire reading_from_memory;
 wire writing_to_memory;
 
-/*
- assign inst_vector = {
-        is_rtype,            [10]
-        is_itype_alu,        [9]
-        is_load,             [8]
-        is_store,            [7]
-        is_branch,           [6]
-        is_jal,              [5]
-        is_jalr,             [4]
-        is_lui,              [3]
-        is_auipc,            [2]
-        is_ebreak,           [1]
-        invalid_instruction  [0]
-    };
-*/
 
 // Whether the current instruction in ID uses rs1 or rs2 
 assign uses_rs1 = valid_id && (id_inst_vector[10] || id_inst_vector[9] || id_inst_vector[8] || 
@@ -141,7 +125,7 @@ assign mem_hazard= mem_hazard_raw|| mem_hazard_base;
 // PC hazard (branch or jump taken in EX)
 assign pc_hazzard = valid_ex && ex_redirect;
 
-// Freeze PC and stall IF/ID during a data hazard (unless EX is redirecting the PC)
+// Freeze PC and stall IF/ID during a data hazard
 assign freeze_pc    = (RAW_hazzard || mem_hazard) && !pc_hazzard;
 assign stall_if_id  = (RAW_hazzard || mem_hazard) && !pc_hazzard;
 assign stall_id_ex  = 1'b0;
@@ -151,7 +135,7 @@ assign stall_mem_wb = 1'b0;
 // Flush IF/ID on a taken branch/jump
 assign clear_if_id  = pc_hazzard;
 
-// Flush ID/EX on a taken branch/jump OR when inserting a bubble for a RAW/mem hazard stall
+// Flush ID/EX if branch or jumped or when inserting a no operation for a RAW/mem hazard stall
 assign clear_id_ex  = pc_hazzard || RAW_hazzard || mem_hazard;
 
 assign clear_ex_mem = 1'b0; 

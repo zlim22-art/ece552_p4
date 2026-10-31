@@ -9,11 +9,12 @@ module alu_cntrl (
     wire [2:0] func3;
     wire [6:0] func7;
     wire [6:0] opcode;
-
+    //Bitslicing instruction into func3, func7 and opcode
     assign func3 = instruction[14:12];
     assign func7 = instruction[31:25];
     assign opcode = instruction[6:0];
 
+    //Assigning alu control signals based on the instruction opcode and function codes
     always @(*) begin
         case (opcode)
             7'b0110011: begin
@@ -29,42 +30,42 @@ module alu_cntrl (
                 o_unsigned = func3[0];
                 o_arith    = func7[5];
             end
-            7'b0010111: begin //U (auipc)
+            7'b0010111: begin //U for auipc
                 o_opsel = 3'b000;
                 o_sub = 1'b0;
                 o_unsigned = 1'b0;
                 o_arith = 1'b0;
             end
 
-            7'b0000011: begin //I (load)
+            7'b0000011: begin //I for load
                 o_opsel = 3'b000;
                 o_sub = 1'b0;
                 o_unsigned = 1'b0;
                 o_arith = 1'b0;
             end
 
-            7'b0100011: begin //S (store)
+            7'b0100011: begin //S for store
                 o_opsel = 3'b000;
                 o_sub = 1'b0;
                 o_unsigned = 1'b0;
                 o_arith = 1'b0;
             end
 
-            7'b1100011: begin //B
+            7'b1100011: begin //B for branch
                 o_opsel = 3'b000;
                 o_sub = 1'b1;
                 o_unsigned = func3[1];
                 o_arith = 1'b0;
             end
 
-            7'b1100111: begin //I (jalr)
+            7'b1100111: begin //I for jalr
                 o_opsel = 3'b000;
                 o_sub = 1'b0;
                 o_unsigned = 1'b0;
                 o_arith = 1'b0;
             end
 
-            default: begin
+            default: begin //Default alu control signals
                 o_opsel = 3'b000;
                 o_sub = 1'b0;
                 o_unsigned = 1'b0;

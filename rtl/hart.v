@@ -147,7 +147,7 @@ module hart #(
     wire [31:0] if_inst;
     wire if_valid;
 
-    // decode stage signals
+    // decode
     wire [31:0] pc_plus4;
     wire [31:0] rs1_data, rs2_data, imm;
     wire is_rtype, is_itype_alu, is_load, is_store, is_branch;
@@ -166,7 +166,7 @@ module hart #(
     wire invalid_instruction;
     wire [10:0] id_inst_vector;
 
-    // execute stage signals
+    // execute 
     wire [31:0] alu_result;
     wire alu_eq, alu_slt, alu_n, alu_z, alu_v, alu_c;
 
@@ -202,7 +202,7 @@ module hart #(
     wire ex_redirect_raw;
     wire ex_redirect;
 
-    // memory stage signals
+    // memory 
     wire [31:0] load_data;
 
     wire [31:0] mem_pc;
@@ -236,7 +236,7 @@ module hart #(
     wire [3:0] dmem_mask_wire;
     wire [31:0] dmem_wdata_wire;
 
-    // write-back stage signals
+    // write-back
     wire [31:0] wb_mem_pc;
     wire [31:0] wb_pc_rslt;
     wire [31:0] wb_imm;
@@ -276,7 +276,7 @@ module hart #(
     wire stall_ex_mem, stall_id_ex, stall_mem_wb;
     wire clear_ex_mem, clear_id_ex, clear_if_id, clear_mem_wb;
 
-    // fetch stage instance
+    // first we fetch
     fetch #(
         .RESET_ADDR(RESET_ADDR)
     ) fetch_inst (
@@ -288,12 +288,11 @@ module hart #(
         .current_pc(pc),
         .pc_plus4(pc_plus4)
     );
-
+    //assign inst, pc and valid signals to the if_id pipeline
     assign o_imem_raddr = pc;
     assign if_inst = i_imem_rdata;
     assign if_valid = !i_rst;
-
-    // if-id pipeline instance
+    // then we go into the instruction fetch pipe where stalling or flushing can occur
     if_id_pipline if_id_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
@@ -310,7 +309,8 @@ module hart #(
         .flush(clear_if_id)
     );
 
-    // decode stage instance
+    // after first pipe, we decode to find out what the instruction is
+
     decode decode_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
@@ -341,8 +341,7 @@ module hart #(
         .rs2_addr(id_rs2_addr),
         .inst_vector(id_inst_vector)
     );
-
-    // id-ex pipeline instance
+    // after decoding, we enter decode pipe where stalling or flushing can occur
     wire [10:0] ex_inst_vector;
     id_ex_pipeline id_ex_inst (
         .id_inst_vector(id_inst_vector),
@@ -399,8 +398,8 @@ module hart #(
         .flush(clear_id_ex),
         .stall(stall_id_ex)
     );
-
-    // execute stage instance
+    
+    // after that, we perform required operations in executre through alu
     execute execute_inst (
         .alu_opsel(ex_op_sell),
         .alu_sub(ex_i_sub),
@@ -433,7 +432,7 @@ module hart #(
     assign ex_rs1_addr = ex_inst[19:15];
     assign ex_rs2_addr = ex_inst[24:20];
 
-    // ex-mem pipeline instance
+    // then we pass alu result into mem stage through ex_mem pipe(stalling and flushing doesnt occur)
     wire [10:0] mem_inst_vector;
     ex_mem_pipeline ex_mem_inst (
         .ex_inst_vector(ex_inst_vector),
@@ -493,7 +492,7 @@ module hart #(
         .stall(stall_ex_mem)
     );
 
-    // memory stage instance
+    // this is where data memory is accessed and load data is generated. This is also where misaligned memory access is detected
     mem mem_inst (
         .i_dmem_rdata(i_dmem_rdata),
         .rs2_data(mem_rs2_data),
@@ -512,7 +511,7 @@ module hart #(
         .o_dmem_wen(dmem_wen_wire),
         .memory_misaligned(memory_misaligned)
     );
-
+    // checking any invalid instr or invalid mem access
     assign mem_trap = mem_invalid_instruction || memory_misaligned;
 
     assign mem_regwrite = mem_valid &&
@@ -525,14 +524,14 @@ module hart #(
         mem_is_jal ||
         mem_is_jalr) &&
         (mem_rd_addr != 5'd0);
-
+    // output data memory variables
     assign o_dmem_addr = dmem_addr_wire;
     assign o_dmem_ren = dmem_ren_wire;
     assign o_dmem_wen = dmem_wen_wire;
     assign o_dmem_wdata = dmem_wdata_wire;
     assign o_dmem_mask = dmem_mask_wire;
     
-    // mem-wb pipeline instance
+    // after memory access, we enter final pipe into write back stage
     mem_wb_pipline mem_wb_inst (
         .mem_inst_vector(mem_inst_vector),
         .clk(i_clk),
@@ -599,11 +598,11 @@ module hart #(
     
     assign valid_id = id_valid;
 
-    // hazard control instance
+    // this is to handle RAW hazards and branch control hazards
     hazard_ctrl hazard_ctrl_inst (
         .clk(i_clk),
 
-        // from ID stage
+        // from id stage
         .rs1_addr(id_inst[19:15]),
         .rs2_addr(id_inst[24:20]),
         .id_inst_vector(id_inst_vector),
@@ -613,7 +612,7 @@ module hart #(
         .id_flags(id_flags),
         .ebreak_triggered(is_ebreak),
 
-        // from EX stage
+        // from execute stage
         .ex_inst_vector(ex_inst_vector),
         .valid_ex(ex_valid),
         .ex_is_load(ex_is_load),
@@ -622,7 +621,7 @@ module hart #(
         .ex_rd_addr(ex_rd_addr),
         .ex_redirect(ex_redirect),
 
-        // from MEM stage
+        // from mem stage
         .mem_inst_vector(mem_inst_vector),
         .valid_mem(mem_valid),
         .mem_is_load(mem_is_load),
@@ -630,7 +629,7 @@ module hart #(
         .ex_mem_flgs(ex_mem_flgs),
         .mem_rd_addr(mem_rd_addr),
 
-        // from WB stage
+        // from write back stage
         .wb_inst_vector(wb_inst_vector),
         .valid_wb(wb_valid),
         .mem_wb_flgs(mem_wb_flgs),

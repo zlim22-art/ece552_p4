@@ -32,7 +32,7 @@ module execute(
     wire [2:0] funct3;
 
     assign funct3 = instruction[14:12];
-
+    //performing alu operation based on the control signals and operands
     alu alu_i (
         .i_opsel(alu_opsel),
         .i_sub(alu_sub),
@@ -48,7 +48,7 @@ module execute(
         .o_v(alu_v),
         .o_c(alu_c)
     );
-
+    // controlling next pc based on instruction type and alu flags
     pc_cntrl pc_cntrl_i (
         .functionselect(funct3),
         .jmp_flag(is_jal),
@@ -66,7 +66,7 @@ module execute(
         .pc_nxt(nxt_pc),
         .redirect(ex_redirect)
     );
-
+    // getting alu ops and asserting alusrc based on whether we use rs2 or imm
     assign alu_op1 = is_auipc ? pc : rs1_data;
     assign alu_op2 = ALUsrc ? imm : rs2_data;
     assign ALUsrc = ~(flag[0] || flag[3]);
