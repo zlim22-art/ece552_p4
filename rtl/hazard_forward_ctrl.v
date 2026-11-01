@@ -62,18 +62,19 @@ module hazard_forward_ctrl(
     output wire o_trap,
 
 
-    output wire ex_ex_forwarding,
     output wire ex_ex_forwarding_rs1,
     output wire ex_ex_forwarding_rs2,
 
-    output wire mem_ex_forwarding,
     output wire mem_ex_forwarding_rs1_load_rslt,
+    output wire mem_ex_forwarding_rs2_load_rslt,
 
     output wire mem_ex_forwarding_rs1_piped_rs1,
     output wire mem_ex_forwarding_rs2_piped_rs2,
     
-
-
+    output wire mismatch_rs11,
+    output wire mismatch_rs12,
+    output wire mismatch_rs21,
+    output wire mismatch_rs22
     );
 
 wire uses_rs1;
