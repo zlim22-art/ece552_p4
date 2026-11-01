@@ -63,7 +63,18 @@ module hazard_forward_ctrl(
 
 
     output wire ex_ex_forwarding,
-    output wire mem_ex_forwarding
+    output wire ex_ex_forwarding_rs1,
+    output wire ex_ex_forwarding_rs2,
+
+    output wire mem_ex_forwarding,
+    output wire mem_ex_forwarding_rs1_load_rslt,
+    output wire mem_ex_forwarding_rs2_load_rlst,
+
+    output wire mem_ex_forwarding_rs1_piped_rs1,
+    output wire mem_ex_forwarding_rs2_piped_rs2,
+    
+
+
     );
 
 wire uses_rs1;
@@ -81,12 +92,39 @@ wire pc_hazzard;
 wire reading_from_memory;
 wire writing_to_memory;
 
+wire forwarding_ex_rs1;
+wire forwarding_ex_rs2;
+wire forwarding_mem_rs1;
+wire forwarding_mem_rs2;
+
+wire forwarding_mem_rs1_ex_rs1;
+wire forwarding_mem_rs1_ex_rs2;
+
+wire [2:0] forwarding;
+
 
 // Whether the current instruction in ID uses rs1 or rs2 
 assign uses_rs1 = valid_id && (id_inst_vector[10] || id_inst_vector[9] || id_inst_vector[8] || 
                                id_inst_vector[7]  || id_inst_vector[6] || id_inst_vector[4]);
 
 assign uses_rs2 = valid_id && (id_inst_vector[10] || id_inst_vector[7] || id_inst_vector[6]);
+
+
+
+// Whether the current insuction  the mememory instruction uses rs1 or rs2 
+assign mem_uses_rs1 = valid_id && (mem_inst_vector[10] || mem_inst_vector[9] || mem_inst_vector[8] || 
+                               mem_inst_vector[7]  || mem_inst_vector[6] || mem_inst_vector[4]);
+
+assign mem_uses_rs2 = valid_id && (mem_inst_vector[10] || mem_inst_vector[7] || mem_inst_vector[6]);
+
+
+
+// Whether the current insuction  the exucute stage  uses rs1 or rs2 
+assign ex_uses_rs1 = valid_id && (ex_inst_vector[10] || ex_inst_vector[9] || ex_inst_vector[8] || 
+                               ex_inst_vector[7]  || ex_inst_vector[6] || ex_inst_vector[4]);
+
+assign ex_uses_rs2 = valid_id && (ex_inst_vector[10] || ex_inst_vector[7] || ex_inst_vector[6]);
+
 
 // Whether instructions in EX, MEM, or WB write to rd
 assign ex_writes_rd  = valid_ex && (ex_inst_vector[10] || ex_inst_vector[9] || ex_inst_vector[8] || 
@@ -105,19 +143,25 @@ assign wb_writes_rd  = valid_wb && (wb_inst_vector[10] || wb_inst_vector[9] || w
 assign RAW_hazzard_in_ex  = ex_writes_rd && (ex_rd_addr != 5'd0) &&
                             ((uses_rs1 && (rs1_addr == ex_rd_addr)) || 
                              (uses_rs2 && (rs2_addr == ex_rd_addr)));
+assign RAW_hazzard_in_id_mem  = mem_writes_rd && (mem_rd_addr != 5'd0) &&
+                            ((mem_uses_rs1 && (rs1_addr == mem_rd_addr)) || 
+                             (mem_uses_rs2 && (rs2_addr == mem_rd_addr)));
 
+assign RAW_hazzard_mem_ex = ex_writes_rd && (ex_rd_addr != 5'd0) &&
+                            ((mem_uses_rs1 && (ex_rs1_addr == mem_rd_addr)) || 
+                             (mem_uses_rs2 && (ex_rs2_addr == mem_rd_addr)));
 
+// if mem is not writing to ex_rs1 or ex_rs2 but there exists a mistmatch bnetweeen the x_rs1 and mrs_1
+// or ex_rs2 and meem_rs2 then we must have msisses somehthing. This shuld only come nto play if the wb instction is writing to
+// forward rs1 or rs2 from mem to ex's rs1 or rs2
+wire mismatch_reg_ex_mem= wb_writes_rd && (ex_rs1_addr == mem_rs1_addr || ex_rs2_addr == mem_rs2_addr) && (ex_rs1_addr==wb_rd_addr || ex_rs2_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr || ex_rs2_addr==mem_rd_addr);
 
 // no longer needed beocuse of forwarding
 // assign RAW_hazzard_in_wb  = wb_writes_rd && (wb_rd_addr != 5'd0) && 
 //                             ((uses_rs1 && (rs1_addr == wb_rd_addr)) ||
 //                              (uses_rs2 && (rs2_addr == wb_rd_addr)));
 
-assign RAW_hazzard = RAW_hazzard_in_ex || RAW_hazzard_in_mem || RAW_hazzard_in_wb;
-
-
-
-
+assign RAW_hazzard = RAW_hazzard_in_ex || RAW_hazzard_in_id_mem || RAW_hazzard_mem_ex;
 
     // assign inst_vector = {
     //     is_rtype,            // [10]
@@ -160,22 +204,34 @@ assign mem_hazard_base = (id_inst_vector[8] || id_inst_vector[7]) && (
 
 */
 
-
-// loaidng after you moddfiy the base adress. Can be fixed by MEM-EX Forwarding 
-wire store_or_load_after_base_modification_ex_mem = (ex_inst_vector[8] || ex_inst_vector[7]) && (
-                         (valid_mem && mem_writes_rd && (mem_rd_addr != 5'd0) && (ex_rs1 == mem_rd_addr))
+// Sub for mem-mem forwarding 
+// Loading the destination data from load into the base address for a load/store in the next instruction
+wire store_or_load_after_base_modification_ex_mem_with_stall = (ex_inst_vector[8] || ex_inst_vector[7]) && (
+                         (valid_mem && mem_writes_rd && (mem_rd_addr != 5'd0) && (ex_rs1_addr == mem_rd_addr))
                          );
 
 
 
-
+// Mem-ex forwarding 
 // Loading into a destination register and the store is storing form the mems destiation resigters as the store data 
 // FIX ->  Stalling 
 wire store_after_load_data_hazard = (mem_inst_vector[8]  && ex_inst_vector[7]) && (  
                          (valid_ex &&  |ex_rs2_addr && mem_writes_rd && (mem_rd_addr == ex_rs2_addr)));
 
+wire arith_after_load_data_hazard = (mem_inst_vector[8] && (ex_inst_vector[10] || ex_inst_vector[9]) ) && (
+                         (valid_ex && |ex_rs1_addr && mem_writes_rd && (mem_rd_addr == ex_rs1_addr)) ||
+                         (valid_ex && |ex_rs2_addr && mem_writes_rd && (mem_rd_addr == ex_rs2_addr)));
+
+wire arith_after_arith_with_intermediate_independent_operation = ((ex_inst_vector[10] || ex_inst_vector[9]) && (mem_inst_vector[10] || mem_inst_vector[9])) && (
+                         (valid_ex && |ex_rs1_addr && mem_writes_rd && (mem_rd_addr == ex_rs1_addr)) ||
+                         (valid_ex && |ex_rs2_addr && mem_writes_rd && (mem_rd_addr == ex_rs2_addr)));
+
+// Ex-ex forwarding
+wire arith_arith_ex_ex_forwarding = RAW_hazard_id_ex && (ex_inst_vector[10] || ex_inst_vector[9]) && (mem_inst_vector[10] || mem_inst_vector[9]);
 
 
+
+assign 
 
 
 assign mem_hazard= store_after_load_data_hazard;
