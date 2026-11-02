@@ -26,6 +26,7 @@ module decode (
     output wire is_ebreak,
     output wire [4:0] rs1_addr,
     output wire [4:0] rs2_addr,
+    output wire [4:0] rd_addr,
     output wire [10:0] inst_vector      // makes stuff esier when piping this
 );
     // falg generation for cheking instruction type
@@ -72,6 +73,8 @@ module decode (
 
     assign rs1_addr = instruction[19:15];
     assign rs2_addr = instruction[24:20];
+    assign rd_addr = instruction[11:7];
+
     // assigning ebreak address and checking if instruction is invalid
     assign is_ebreak = (instruction == 32'h00100073);
     

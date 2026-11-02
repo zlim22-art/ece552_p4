@@ -9,6 +9,9 @@ module id_ex_pipeline(
     input wire [31:0] imm,
     input wire [31:0] rs1_data,
     input wire [31:0] rs2_data,
+    input wire [4:0] rs1_addr,
+    input wire [4:0] rs2_addr,
+    input wire [4:0] rd_addr,
     input wire is_auipc,
     input wire is_jal,
     input wire is_jalr,
@@ -32,6 +35,9 @@ module id_ex_pipeline(
     output reg [31:0] ex_imm,
     output reg [31:0] ex_rs1_data,
     output reg [31:0] ex_rs2_data,
+    output reg [4:0] ex_rs1_addr,
+    output reg [4:0] ex_rs2_addr,
+    output reg [4:0] ex_rd_addr,
     output reg ex_is_auipc,
     output reg ex_is_jal,
     output reg ex_is_jalr,
@@ -59,6 +65,9 @@ module id_ex_pipeline(
             ex_imm                 <= 32'b0;
             ex_rs1_data            <= 32'b0;
             ex_rs2_data            <= 32'b0;
+            ex_rs1_addr            <= 5'b0;
+            ex_rs2_addr            <= 5'b0;
+            ex_rd_addr             <= 5'b0;
             ex_is_auipc            <= 1'b0;
             ex_is_jal              <= 1'b0;
             ex_is_jalr             <= 1'b0;
@@ -84,6 +93,9 @@ module id_ex_pipeline(
             ex_imm                 <= 32'b0;
             ex_rs1_data            <= 32'b0;
             ex_rs2_data            <= 32'b0;
+            ex_rs1_addr            <= 5'b0;
+            ex_rs2_addr            <= 5'b0;
+            ex_rd_addr             <= 5'b0;
             ex_is_auipc            <= 1'b0;
             ex_is_jal              <= 1'b0;
             ex_is_jalr             <= 1'b0;
@@ -110,6 +122,9 @@ module id_ex_pipeline(
             ex_imm                 <= ex_imm;
             ex_rs1_data            <= ex_rs1_data;
             ex_rs2_data            <= ex_rs2_data;
+            ex_rs1_addr            <= ex_rs1_addr;
+            ex_rs2_addr            <= ex_rs2_addr;
+            ex_rd_addr             <= ex_rd_addr;
             ex_is_auipc            <= ex_is_auipc;
             ex_is_jal              <= ex_is_jal;
             ex_is_jalr             <= ex_is_jalr;
@@ -135,6 +150,9 @@ module id_ex_pipeline(
             ex_imm                 <= imm;
             ex_rs1_data            <= rs1_data;
             ex_rs2_data            <= rs2_data;
+            ex_rs1_addr            <= rs1_addr;
+            ex_rs2_addr            <= rs2_addr;
+            ex_rd_addr             <= rd_addr;
             ex_is_auipc            <= is_auipc;
             ex_is_jal              <= is_jal;
             ex_is_jalr             <= is_jalr;
@@ -155,9 +173,6 @@ module id_ex_pipeline(
             ex_inst_vector         <= id_inst_vector;
         end
 
-
-
-         
     end
 
 endmodule

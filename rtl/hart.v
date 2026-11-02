@@ -150,6 +150,7 @@ module hart #(
     // decode
     wire [31:0] pc_plus4;
     wire [31:0] rs1_data, rs2_data, imm;
+    wire [4:0] id_rd_addr;
     wire is_rtype, is_itype_alu, is_load, is_store, is_branch;
     wire is_jal, is_jalr, is_lui, is_auipc;
     wire [2:0]  alu_opsel;
@@ -339,6 +340,7 @@ module hart #(
         .is_ebreak(is_ebreak),
         .rs1_addr(id_rs1_addr),
         .rs2_addr(id_rs2_addr),
+        .rd_addr(id_rd_addr),
         .inst_vector(id_inst_vector)
     );
     // after decoding, we enter decode pipe where stalling or flushing can occur
@@ -354,6 +356,9 @@ module hart #(
         .imm(imm),
         .rs1_data(rs1_data),
         .rs2_data(rs2_data),
+        .rs1_addr(id_rs1_addr),
+        .rs2_addr(id_rs2_addr),
+        .rd_addr(id_rd_addr),
         .is_auipc(is_auipc),
         .is_jal(is_jal),
         .is_jalr(is_jalr),
@@ -376,6 +381,9 @@ module hart #(
         .ex_imm(ex_imm),
         .ex_rs1_data(ex_rs1_data),
         .ex_rs2_data(ex_rs2_data),
+        .ex_rs1_addr(ex_rs1_addr),
+        .ex_rs2_addr(ex_rs2_addr),
+        .ex_rd_addr(ex_rd_addr),
         .ex_is_auipc(ex_is_auipc),
         .ex_is_jal(ex_is_jal),
         .ex_is_jalr(ex_is_jalr),
@@ -428,9 +436,6 @@ module hart #(
     );
 
     assign ex_redirect = ex_valid && ex_redirect_raw;
-    assign ex_rd_addr = ex_inst[11:7];
-    assign ex_rs1_addr = ex_inst[19:15];
-    assign ex_rs2_addr = ex_inst[24:20];
 
     // then we pass alu result into mem stage through ex_mem pipe(stalling and flushing doesnt occur)
     wire [10:0] mem_inst_vector;
@@ -646,6 +651,39 @@ module hart #(
         .clear_if_id(clear_if_id),
         .clear_mem_wb(clear_mem_wb),
         .o_trap(hazard_trap)
+    );
+
+    module hazard_forward_ctrl(
+    //Sourc register addresses from the EX stage
+    input wire [4:0] ex_rs1_addr,
+    input wire [4:0] ex_rs2_addr,
+
+    // Source register addresses from the MEM stage
+    input wire [4:0] mem_rs1_addr,
+    input wire [4:0] mem_rs2_addr,
+
+    //Source register addresses from the WB stage
+    input wire [4:0] wb_rs1_addr,
+    input wire [4:0] wb_rs2_addr,
+
+    // Destination register addresses for each stage
+    input wire [4:0] ex_rd_addr,
+    input wire [4:0] mem_rd_addr,
+    input wire [4:0] wb_rd_addr,
+
+    output wire ex_ex_forwarding_rs1,
+    output wire ex_ex_forwarding_rs2,
+
+    output wire mem_ex_forwarding_rs1_load_rslt,
+    output wire mem_ex_forwarding_rs2_load_rslt,
+
+    output wire mem_ex_forwarding_rs1_piped_rs1,
+    output wire mem_ex_forwarding_rs2_piped_rs2,
+    
+    output wire mismatch_rs11,
+    output wire mismatch_rs12,
+    output wire mismatch_rs21,
+    output wire mismatch_rs22
     );
 
     assign wb_rd_data =
