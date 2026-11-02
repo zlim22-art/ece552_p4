@@ -138,24 +138,25 @@ assign wb_writes_rd  = valid_wb && (wb_inst_vector[10] || wb_inst_vector[9] || w
                                     wb_inst_vector[2]);
 
 // RAW hazard detection in EX, MEM, and WB stages
-assign RAW_hazzard_in_ex  = ex_writes_rd && (ex_rd_addr != 5'd0) &&
-                            ((uses_rs1 && (rs1_addr == ex_rd_addr)) || 
-                             (uses_rs2 && (rs2_addr == ex_rd_addr)));
-assign RAW_hazzard_in_id_mem  = mem_writes_rd && (mem_rd_addr != 5'd0) &&
+assign RAW_hazzard_in_ex = ex_writes_rd && (ex_rd_addr != 5'd0) &&
+                            ((uses_rs1 && (rs1_addr == ex_rd_addr)) ||
+                            (uses_rs2 && (rs2_addr == ex_rd_addr)));
+
+assign RAW_hazzard_in_id_mem = mem_writes_rd && (mem_rd_addr != 5'd0) &&
                             ((mem_uses_rs1 && (rs1_addr == mem_rd_addr)) || 
-                             (mem_uses_rs2 && (rs2_addr == mem_rd_addr)));
+                            (mem_uses_rs2 && (rs2_addr == mem_rd_addr)));
 
 assign RAW_hazzard_mem_ex = ex_writes_rd && (ex_rd_addr != 5'd0) &&
-                            ((mem_uses_rs1 && (ex_rs1_addr == mem_rd_addr)) || 
-                             (mem_uses_rs2 && (ex_rs2_addr == mem_rd_addr)));
+                            ((mem_uses_rs1 && (ex_rs1_addr == mem_rd_addr)) ||
+                            (mem_uses_rs2 && (ex_rs2_addr == mem_rd_addr)));
 
 // if mem is not writing to ex_rs1 or ex_rs2 but there exists a mistmatch bnetweeen the x_rs1 and mrs_1
 // or ex_rs2 and meem_rs2 then we must have msisses somehthing. This shuld only come nto play if the wb instction is writing to
 // forward rs1 or rs2 from mem to ex's rs1 or rs2
-wire mismatch_reg_ex_mem_rs11= wb_writes_rd && (ex_rs1_addr == mem_rs1_addr || ex_rs2_addr == mem_rs2_addr) && (ex_rs1_addr==wb_rd_addr || ex_rs2_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr || ex_rs2_addr==mem_rd_addr);
-wire mismatch_reg_ex_mem_rs12= wb_writes_rd && (ex_rs1_addr == mem_rs1_addr || ex_rs2_addr == mem_rs2_addr) && (ex_rs1_addr==wb_rd_addr || ex_rs2_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr || ex_rs2_addr==mem_rd_addr);
-wire mismatch_reg_ex_mem_rs21= wb_writes_rd && (ex_rs1_addr == mem_rs1_addr || ex_rs2_addr == mem_rs2_addr) && (ex_rs1_addr==wb_rd_addr || ex_rs2_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr || ex_rs2_addr==mem_rd_addr);
-wire mismatch_reg_ex_mem_rs22= wb_writes_rd && (ex_rs1_addr == mem_rs1_addr || ex_rs2_addr == mem_rs2_addr) && (ex_rs1_addr==wb_rd_addr || ex_rs2_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr || ex_rs2_addr==mem_rd_addr);
+wire mismatch_reg_ex_mem_rs11= wb_inst_vector[8] && (ex_rs1_addr == mem_rs1_addr) && (ex_rs1_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr);
+wire mismatch_reg_ex_mem_rs12= wb_inst_vector[8] && (ex_rs2_addr == mem_rs1_addr) && (ex_rs2_addr==wb_rd_addr) && (ex_rs2_addr==mem_rd_addr);
+wire mismatch_reg_ex_mem_rs21= wb_inst_vector[8] && (ex_rs1_addr == mem_rs2_addr) && (ex_rs1_addr==wb_rd_addr) && (ex_rs1_addr==mem_rd_addr);
+wire mismatch_reg_ex_mem_rs22= wb_inst_vector[8] && (ex_rs2_addr == mem_rs2_addr) && (ex_rs2_addr==wb_rd_addr) && (ex_rs2_addr==mem_rd_addr);
 
 // no longer needed beocuse of forwarding
 // assign RAW_hazzard_in_wb  = wb_writes_rd && (wb_rd_addr != 5'd0) && 
@@ -252,21 +253,20 @@ assign clear_mem_wb = 1'b0;
 // we are in the meme stage and are seeing if essetially whatver we are sseing again if the inscction realies on whatver s about to wb. So here it would be wrttien essetially to rs1 or rs2 the alu output.
 // final forwaeifng sinals should have peieorty for 1-cycle then 2 cycle.
 
-assign   mem_ex_forwarding     = ~RAW_hazard_in_ex & RAW_hazard_in_mem;
+assign mem_ex_forwarding = ~RAW_hazard_in_ex & RAW_hazard_in_mem;
 
 // Ex to Ex signal -> RAW: 1-cycle distance RAW
 // We are in the Ex stage and e are sisng if essentially the nextinsuctions r1 or r2 depended on essetially the current inscution in ex
 // if so we raise the froewrding singal and maki it so that the ALU pipes rs1 data or rs2 data input is overwriteeen with the current alu ouput
 
-assign ex_ex_forwarding_rs1 =RAW_hazzard_in_ex && (ex_rs1_addr == ex_rd_addr);
-assign ex_ex_forwarding_rs2 =RAW_hazzard_in_ex && (ex_rs2_addr == ex_rd_addr);
+assign ex_ex_forwarding_rs1 = !ex_inst_vector[8] && RAW_hazzard_in_ex && (uses_rs1 && (rs1_addr == ex_rd_addr));
+assign ex_ex_forwarding_rs2 = !ex_inst_vector[8] && RAW_hazzard_in_ex && (uses_rs2 && (rs2_addr == ex_rd_addr));
 
+assign mem_ex_forwarding_rs1_load_rslt_rs1 = mem_inst_vector[8] && RAW_hazzard_in_id_mem && (uses_rs1 && (rs1_addr == mem_rd_addr));
+assign mem_ex_forwarding_rs1_load_rslt_rs2 = mem_inst_vector[8] && RAW_hazzard_in_id_mem && (uses_rs2 && (rs2_addr == mem_rd_addr));
 
-assign mem_ex_forwarding_rs1_load_rslt_rs1 = 
-assign mem_ex_forwarding_rs1_load_rslt_rs2 =
-
-assign mem_ex_forwarding_rs1_piped_rs1 = 
-assign mem_ex_forwarding_rs2_piped_rs2 =
+assign mem_ex_forwarding_rs1_piped_rs1 = RAW_hazzard_mem_ex_rs1 && (mem_uses_rs1 && (ex_rs1_addr == mem_rd_addr));
+assign mem_ex_forwarding_rs2_piped_rs2 = RAW_hazzard_mem_ex_rs2 && (mem_uses_rs2 && (ex_rs2_addr == mem_rd_addr));
 
 assign o_trap = valid_wb && wb_inst_vector[0];
 
