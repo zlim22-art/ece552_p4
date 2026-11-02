@@ -202,6 +202,7 @@ module hart #(
     wire ex_invalid_instruction;
     wire ex_redirect_raw;
     wire ex_redirect;
+    wire [10:0] ex_inst_vector;
 
     // memory 
     wire [31:0] load_data;
@@ -236,6 +237,7 @@ module hart #(
     wire dmem_wen_wire;
     wire [3:0] dmem_mask_wire;
     wire [31:0] dmem_wdata_wire;
+    wire [10:0] mem_inst_vector;
 
     // write-back
     wire [31:0] wb_mem_pc;
@@ -279,9 +281,9 @@ module hart #(
 
     // forwarding 
     wire ex_ex_forwarding_rs1, ex_ex_forwarding_rs2;
-    wire mem_ex_forwarding_rs1_load_rslt_rs1, mem_ex_forwarding_rs1_load_rslt_rs2;
-    wire mem_ex_forwarding_rs1_piped_rs1, mem_ex_forwarding_rs2_piped_rs2;
+    wire mem_ex_forwarding_rs1, mem_ex_forwarding_rs2;
     wire [31:0] forwarded_rs1, forwarded_rs2;
+    wire [31:0] forwarded_data;
 
     // first we fetch
     fetch #(
@@ -350,7 +352,6 @@ module hart #(
         .inst_vector(id_inst_vector)
     );
     // after decoding, we enter decode pipe where stalling or flushing can occur
-    wire [10:0] ex_inst_vector;
     id_ex_pipeline id_ex_inst (
         .id_inst_vector(id_inst_vector),
         .clk(i_clk),
@@ -443,20 +444,20 @@ module hart #(
 
     assign ex_redirect = ex_valid && ex_redirect_raw;
 
-    assign forwarded_rs1 = mismatched_rs11 ? mem_rs1_data :
-                            mismatched_rs21 ? mem_rs2_data :
-                            (ex_ex_forwarding_rs1) ? mem_alu_result : 
-                            (mem_ex_forwarding_rs1) ? wb_load_rslt : 
+    // data used for ex-ex forwarding right after ex/mem pipe
+    assign forwarded_data = mem_inst_vector[3] ? mem_imm :
+                            (mem_is_jal || mem_is_jalr) ? mem_pc + 32'd4 :
+                            mem_alu_result;
+
+    assign forwarded_rs1 = (ex_ex_forwarding_rs1) ? forwarded_data : 
+                            (mem_ex_forwarding_rs1) ? wb_rd_data : 
                             ex_rs1_data;
 
-    assign forwarded_rs2 = mismatched_rs12 ? mem_rs1_data :
-                            mismatched_rs22 ? mem_rs2_data :
-                            (ex_ex_forwarding_rs2) ? mem_alu_result :
-                            (mem_ex_forwarding_rs2) ? wb_load_rslt :
+    assign forwarded_rs2 = (ex_ex_forwarding_rs2) ? forwarded_data :
+                            (mem_ex_forwarding_rs2) ? wb_rd_data :
                             ex_rs2_data;
 
     // then we pass alu result into mem stage through ex_mem pipe(stalling and flushing doesnt occur)
-    wire [10:0] mem_inst_vector;
     ex_mem_pipeline ex_mem_inst (
         .ex_inst_vector(ex_inst_vector),
         .clk(i_clk),
@@ -465,8 +466,8 @@ module hart #(
         .ex_pc(ex_pc),
         .ex_inst(ex_inst),
         .ex_imm(ex_imm),
-        .ex_rs1_data(ex_rs1_data),
-        .ex_rs2_data(ex_rs2_data),
+        .ex_rs1_data(forwarded_rs1),
+        .ex_rs2_data(forwarded_rs2),
         .ex_is_auipc(ex_is_auipc),
         .ex_is_jal(ex_is_jal),
         .ex_is_jalr(ex_is_jalr),
@@ -624,8 +625,8 @@ module hart #(
     // this is to handle RAW hazards and branch control hazards
     hazard_forward_ctrl hazard_fw_inst (
         // from id stage
-        .rs1_addr(id_rs1_addr),
-        .rs2_addr(id_rs2_addr),
+        .id_rs1_addr(id_rs1_addr),
+        .id_rs2_addr(id_rs2_addr),
         .id_inst_vector(id_inst_vector),
         .valid_id(valid_id),
         .is_load(is_load),
@@ -677,14 +678,8 @@ module hart #(
         // forwarding signals
         .ex_ex_forwarding_rs1(ex_ex_forwarding_rs1),
         .ex_ex_forwarding_rs2(ex_ex_forwarding_rs2),
-        .mem_ex_forwarding_rs1_load_rslt(mem_ex_forwarding_rs1_load_rslt),
-        .mem_ex_forwarding_rs2_load_rslt(mem_ex_forwarding_rs2_load_rslt),
-        .mem_ex_forwarding_rs1_piped_rs1(mem_ex_forwarding_rs1_piped_rs1),
-        .mem_ex_forwarding_rs2_piped_rs2(mem_ex_forwarding_rs2_piped_rs2),
-        .mismatch_rs11(mismatch_rs11),
-        .mismatch_rs12(mismatch_rs12),
-        .mismatch_rs21(mismatch_rs21),
-        .mismatch_rs22(mismatch_rs22)
+        .mem_ex_forwarding_rs1(mem_ex_forwarding_rs1),
+        .mem_ex_forwarding_rs2(mem_ex_forwarding_rs2)
     );
 
     assign wb_rd_data =
