@@ -9,23 +9,29 @@ module hart #(
     input  wire        i_rst,
     // Instruction fetch goes through a read only instruction memory (imem)
     // port. The port accepts a 32-bit address (e.g. from the program counter)
-    // per cycle and combinationally returns a 32-bit instruction word. This
-    // is not representative of a realistic memory interface; it has been
-    // modeled as more similar to a DFF or SRAM to simplify phase 3. In
-    // later phases, you will replace this with a more realistic memory.
+    // per cycle and sequentially returns a 32-bit instruction word. For
+    // projects 6 and 7, this memory has been updated to be more realistic
+    // - reads are no longer combinational, and both read and write accesses
+    // take multiple cycles to complete.
     //
+    // The testbench memory models a fixed, multi cycle memory with partial
+    // pipelining. The memory will accept a new request every N cycles by
+    // asserting `mem_ready`, and if a request is made, the memory perform
+    // the request (read or write) after M cycles, asserting mem_valid to
+    // indicate the read data is ready (or the write is complete). Requests
+    // are completed in order. The values of N and M are deterministic, but
+    // may change between test cases - you must design your CPU to work
+    // correctly by looking at `mem_ready` and `mem_valid` rather than
+    // hardcoding a latency assumption.
+    //
+    // Indicates that the memory is ready to accept a new read request.
+    input  wire        i_imem_ready,
     // 32-bit read address for the instruction memory. This is expected to be
     // 4 byte aligned - that is, the two LSBs should be zero.
     output wire [31:0] o_imem_raddr,
-    // Instruction word fetched from memory, available on the same cycle.
+    // Instruction word fetched from memory, available sequentially some
+    // M cycles after a request (imem_ren) is issued.
     input  wire [31:0] i_imem_rdata,
-    // Data memory accesses go through a separate read/write data memory (dmem)
-    // that is shared between read (load) and write (stored). The port accepts
-    // a 32-bit address, read or write enable, and mask (explained below) each
-    // cycle. Reads are combinational - values are available immediately after
-    // updating the address and asserting read enable. Writes occur on (and
-    // are visible at) the next clock edge.
-    //
     // Read/write address for the data memory. This should be 32-bit aligned
     // (i.e. the two LSB should be zero). See `o_dmem_mask` for how to perform
     // half-word and byte accesses at unaligned addresses.
@@ -38,8 +44,8 @@ module hart #(
     // When asserted, the memory will perform a write to the aligned address
     // `o_dmem_addr`. When asserted, the memory will write the bytes in
     // `o_dmem_wdata` (specified by the mask) to memory at the specified
-    // address on the next rising clock edge. It is illegal to assert this and
-    // `o_dmem_ren` on the same cycle.
+    // address. It is illegal to assert this and `o_dmem_ren` on the same
+    // cycle.
     output wire        o_dmem_wen,
     // The 32-bit word to write to memory when `o_dmem_wen` is asserted. When
     // write enable is asserted, the byte lanes specified by the mask will be
@@ -58,14 +64,38 @@ module hart #(
     // two bytes of `i_dmem_rdata` can be assumed to have valid data; to
     // calculate the final value of the `lh[u]` instruction, shift the rdata
     // word right by 16 bits and sign/zero extend as appropriate.
-    //
-    output wire [31:0] o_retire_dmem_addr,
-    output wire        o_retire_dmem_ren,
-    output wire        o_retire_dmem_wen,
-    output wire [ 3:0] o_retire_dmem_mask,
-    output wire [31:0] o_retire_dmem_wdata,
-    output wire [31:0] o_retire_dmem_rdata,
+    
+    // **NEW**
+    // Indicates that a valid instruction word is being returned from memory.
+    input  wire        i_imem_valid,
 
+    // Data memory accesses go through a separate read/write data memory (dmem)
+    // that is shared between read (load) and write (stored). The port accepts
+    // a 32-bit address, read or write enable, and mask (explained below) each
+    // cycle.
+    //
+    // The timing of the dmem interface is the same as the imem interface. See
+    // the documentation above.
+    //
+    // Indicates that the memory is ready to accept a new read or write request.
+    input  wire        i_dmem_ready,
+
+    // Indicates that a valid data word is being returned from memory.
+    input  wire        i_dmem_valid,
+
+    // The dmem interface expects word (32 bit) aligned addresses. However,
+    // the processor supports byte and half-word loads and stores at unaligned
+    // and 16-bit aligned addresses, respectively. To support this, the access
+    // mask specifies which bytes within the 32-bit word are actually read
+    // from or written to memory.
+    //
+    // To perform a half-word read at address 0x00001002, align `o_dmem_addr`
+    // to 0x00001000, assert `o_dmem_ren`, and set the mask to 0b1100 to
+    // indicate that only the upper two bytes should be read. Only the upper
+    // two bytes of `i_dmem_rdata` can be assumed to have valid data; to
+    // calculate the final value of the `lh[u]` instruction, shift the rdata
+    // word right by 16 bits and sign/zero extend as appropriate.
+    //
     // To perform a byte write at address 0x00002003, align `o_dmem_addr` to
     // `0x00002000`, assert `o_dmem_wen`, and set the mask to 0b1000 to
     // indicate that only the upper byte should be written. On the next clock
@@ -96,10 +126,6 @@ module hart #(
     // Asserted if the instruction produced a trap, due to an illegal
     // instruction, unaligned data memory access, or unaligned instruction
     // address on a taken branch or jump.
-
-
-
-
     output wire        o_retire_trap,
     // Asserted if the instruction is an `ebreak` instruction used to halt the
     // processor. This is used for debugging and testing purposes to end
@@ -130,6 +156,12 @@ module hart #(
     // writeback stage by this instruction. If rd is 5'd0, this field is
     // ignored and can be treated as a don't care.
     output wire [31:0] o_retire_rd_wdata,
+    output wire [31:0] o_retire_dmem_addr,
+    output wire        o_retire_dmem_ren,
+    output wire        o_retire_dmem_wen,
+    output wire [ 3:0] o_retire_dmem_mask,
+    output wire [31:0] o_retire_dmem_wdata,
+    output wire [31:0] o_retire_dmem_rdata,
     // The current program counter of the instruction being retired - i.e.
     // the instruction memory address that the instruction was fetched from.
     output wire [31:0] o_retire_pc,
