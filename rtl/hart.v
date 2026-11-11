@@ -332,7 +332,7 @@ module hart #(
     //assign inst, pc and valid signals to the if_id pipeline
     assign o_imem_raddr = pc;
     assign if_inst = i_imem_rdata;
-    assign if_valid = !i_rst;
+    assign if_valid = !i_rst && i_imem_valid;
     // then we go into the instruction fetch pipe where stalling or flushing can occur
     if_id_pipline if_id_inst (
         .clk(i_clk),
@@ -475,6 +475,18 @@ module hart #(
     );
 
     assign ex_redirect = ex_valid && ex_redirect_raw;
+
+    assign ex_regwrite =
+        ex_valid &&
+        !ex_invalid_instruction &&
+        (ex_is_rtype ||
+        ex_is_itype ||
+        ex_is_load ||
+        ex_is_lui ||
+        ex_is_auipc ||
+        ex_is_jal ||
+        ex_is_jalr) &&
+        (ex_rd_addr != 5'd0);
 
     // data used for ex-ex forwarding right after ex/mem pipe
     assign forwarded_data = mem_inst_vector[3] ? mem_imm :
@@ -728,19 +740,6 @@ module hart #(
         wb_writes_rd &&
         !wb_trap &&
         (wb_rd_addr != 5'd0);
-
-    assign ex_regwrite =
-        ex_valid &&
-        !ex_invalid_instruction &&
-        (ex_is_rtype ||
-        ex_is_itype ||
-        ex_is_load ||
-        ex_is_lui ||
-        ex_is_auipc ||
-        ex_is_jal ||
-        ex_is_jalr) &&
-        (ex_rd_addr != 5'd0);
-
     
     // retire stage signals
     wire wb_uses_rs1 = wb_valid && (wb_inst[6:0] == 7'b0110011 || wb_inst[6:0] == 7'b0010011 || wb_inst[6:0] == 7'b0000011 || wb_inst[6:0] == 7'b0100011 || wb_inst[6:0] == 7'b1100011 || wb_inst[6:0] == 7'b1100111);
