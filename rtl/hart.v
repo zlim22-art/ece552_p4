@@ -24,8 +24,6 @@ module hart #(
     // correctly by looking at `mem_ready` and `mem_valid` rather than
     // hardcoding a latency assumption.
     //
-    // Indicates that the memory is ready to accept a new read request.
-    input  wire        i_imem_ready,
     // 32-bit read address for the instruction memory. This is expected to be
     // 4 byte aligned - that is, the two LSBs should be zero.
     output wire [31:0] o_imem_raddr,
@@ -66,6 +64,13 @@ module hart #(
     // word right by 16 bits and sign/zero extend as appropriate.
     
     // **NEW**
+    // Issue a read request to the memory on this cycle. This should not be
+    // asserted if `i_imem_ready` is not asserted.
+    output wire        o_imem_ren,
+    
+    // Indicates that the memory is ready to accept a new read request.
+    input  wire        i_imem_ready,
+
     // Indicates that a valid instruction word is being returned from memory.
     input  wire        i_imem_valid,
 
