@@ -332,7 +332,8 @@ module hart #(
     //assign inst, pc and valid signals to the if_id pipeline
     assign o_imem_raddr = pc;
     assign if_inst = i_imem_rdata;
-    assign if_valid = !i_rst && i_imem_valid;
+    assign if_valid = !i_rst;
+    assign reattempt = !i_imem_ready;
     // then we go into the instruction fetch pipe where stalling or flushing can occur
     if_id_pipline if_id_inst (
         .clk(i_clk),
