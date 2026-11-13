@@ -322,23 +322,106 @@ module hart #(
     wire [31:0] forwarded_rs1, forwarded_rs2;
     wire [31:0] forwarded_data;
 
+    // multicycle memory control signals
+    reg inst_pending;
+    reg discard_pending;
+
+    wire req_inst;
+    wire inst_returned;
+
+    wire ifid_AtoA, idex_AtoA, exmem_AtoA;          // checks if inst is Able to Advance
+    wire id_advancing, ex_advancing, mem_advancing;
+
     // first we fetch
     fetch #(
         .RESET_ADDR(RESET_ADDR)
     ) fetch_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
-        .stall(freeze_pc),
+        .stall(!if_valid || freeze_pc),
         .redirect(ex_redirect),
         .next_pc(ex_next_pc),
         .current_pc(pc),
         .pc_plus4(pc_plus4)
     );
-    //assign inst, pc and valid signals to the if_id pipeline
     assign o_imem_raddr = pc;
     assign if_inst = i_imem_rdata;
-    assign if_valid = !i_rst;
-    assign reattempt = !i_imem_ready;
+    assign if_valid = !i_rst && 
+        inst_returned && 
+        !discard_pending && 
+        !ex_redirect;
+
+    // request for instruction from mem
+    assign o_imem_ren = 
+        !i_rst && 
+        i_imem_ready && 
+        !inst_pending && 
+        ifid_AtoA && 
+        !ex_redirect;
+
+    // request accepted when mem is ready to send inst
+    assign req_inst = o_imem_ren && i_imem_ready;
+
+    // recieved valid instruction
+    assign inst_returned = inst_pending && i_imem_valid;
+
+    // check if inst will advance
+    assign id_advancing =
+        id_valid &&
+        !stall_if_id && !stall_id_ex &&
+        !clear_if_id && !clear_id_ex;
+
+    // assign ex_advancing =
+    //     ex_valid &&
+    //     !stall_id_ex && !stall_ex_mem &&
+    //     !clear_id_ex && !clear_ex_mem;
+
+    // assign mem_advancing =
+    //     mem_valid &&
+    //     !stall_ex_mem && !stall_mem_wb &&
+    //     !clear_ex_mem && !clear_mem_wb;
+
+    // check if can advance to next stage (Able to Advance)
+    assign ifid_AtoA =
+        !stall_if_id &&
+        !clear_if_id &&
+        (!id_valid || id_advancing);
+
+    // assign idex_AtoA =
+    //     !stall_id_ex &&
+    //     !clear_id_ex &&
+    //     (!ex_valid || ex_advancing);
+
+    // assign exmem_AtoA =
+    //     !stall_ex_mem &&
+    //     !clear_ex_mem &&
+    //     (!mem_valid || mem_advancing);
+
+    // update pending or discard flags on each clock edge
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            inst_pending <= 1'b0;
+            discard_pending <= 1'b0;
+        end
+        else begin
+            // waiting for valid inst to return
+            if (req_inst) begin
+                inst_pending <= 1'b1;
+            end 
+
+            // valid inst recieved
+            if (inst_returned) begin
+                inst_pending <= 1'b0;
+                discard_pending <= 1'b0;
+            end
+
+            // discard the request for instruction if redirect
+            if (ex_redirect && inst_pending && !inst_returned) begin
+                discard_pending <= 1'b1;
+            end
+        end
+    end
+
     // then we go into the instruction fetch pipe where stalling or flushing can occur
     if_id_pipline if_id_inst (
         .clk(i_clk),
