@@ -25,15 +25,3 @@ module fetch #(
     assign pc_plus4 = current_pc + 32'd4;
 
 endmodule
-        .clk(clk),
-        .rst_n(rst_n),
-        .stall(stall),
-        .redirect(redirect),
-        .next_pc(next_pc),
-        .current_pc(current_pc)
-    );
-
-    // Calculating pc+4 to fetch next instruction
-    assign pc_plus4 = current_pc + 32'd4;
-
-endmodule
