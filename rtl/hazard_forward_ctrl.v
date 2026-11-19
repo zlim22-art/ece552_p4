@@ -48,6 +48,9 @@ module hazard_forward_ctrl(
     input wire ebreak_triggered,
     input wire ex_redirect,
 
+    // mem is waiting for data to load or store
+    input wire mem_wait,
+
     output wire freeze_pc,
     output wire stall_ex_mem,
     output wire stall_id_ex,
@@ -239,14 +242,14 @@ assign pc_hazzard = valid_ex && ex_redirect;
 
 // Stall IF/ID and freeze PC on Load-Use hazard 
 assign freeze_pc    = mem_hazard;
-assign stall_if_id  = mem_hazard;
-assign stall_id_ex  = 1'b0;
-assign stall_ex_mem = 1'b0;
+assign stall_if_id  = mem_hazard || mem_wait;
+assign stall_id_ex  = mem_wait;
+assign stall_ex_mem = mem_wait;
 assign stall_mem_wb = 1'b0;
 
 // Flush ID/EX when stalling  or on correcting a mispredicted branch or jump
 assign clear_if_id  = pc_hazzard;
-assign clear_id_ex  = pc_hazzard || mem_hazard;
+assign clear_id_ex = !mem_wait && (pc_hazzard || mem_hazard);
 assign clear_ex_mem = 1'b0;
 assign clear_mem_wb = 1'b0;
 
