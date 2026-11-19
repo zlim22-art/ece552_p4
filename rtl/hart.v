@@ -322,29 +322,98 @@ module hart #(
     wire [31:0] forwarded_rs1, forwarded_rs2;
     wire [31:0] forwarded_data;
 
+    // multicycle memory control signals
+    reg inst_pending;
+    reg discard_pending;
+    reg dmem_pending;
+    reg [31:0] requested_pc;
+
+    // imem
+    wire req_inst;
+    wire inst_returned;
+    wire ifid_buffer_full;
+    wire fetch_accepted;
+
+    // dmem
+    wire dmem_load;
+    wire dmem_store;
+    wire load_complete;
+    wire store_complete;
+    wire mem_wait;
+
     // first we fetch
     fetch #(
         .RESET_ADDR(RESET_ADDR)
     ) fetch_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
-        .stall(freeze_pc),
+        .stall(!fetch_accepted),
         .redirect(ex_redirect),
         .next_pc(ex_next_pc),
         .current_pc(pc),
         .pc_plus4(pc_plus4)
     );
-    //assign inst, pc and valid signals to the if_id pipeline
     assign o_imem_raddr = pc;
     assign if_inst = i_imem_rdata;
-    assign if_valid = !i_rst;
-    assign reattempt = !i_imem_ready;
+    assign if_valid = !i_rst && 
+        inst_returned && 
+        !discard_pending && 
+        !ex_redirect;
+
+    // request for instruction from mem
+    assign o_imem_ren =
+        !i_rst &&
+        i_imem_ready &&
+        !inst_pending &&
+        !ifid_buffer_full &&
+        !ex_redirect &&
+        !discard_pending;
+
+    // inst accepted from mem
+    assign fetch_accepted =
+        if_valid &&
+        !ifid_buffer_full &&
+        !clear_if_id;
+
+    // request accepted when mem is ready to send inst
+    assign req_inst = o_imem_ren && i_imem_ready;
+
+    // recieved valid instruction
+    assign inst_returned = inst_pending && i_imem_valid;
+
+    // update pending or discard flags on each clock edge
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            inst_pending <= 1'b0;
+            discard_pending <= 1'b0;
+            requested_pc <= RESET_ADDR;
+        end
+        else begin
+            // waiting for valid inst to return
+            if (req_inst) begin
+                inst_pending <= 1'b1;
+                requested_pc <= pc;
+            end 
+
+            // valid inst recieved
+            if (inst_returned) begin
+                inst_pending <= 1'b0;
+                discard_pending <= 1'b0;
+            end
+
+            // discard the request for instruction if redirect
+            if (ex_redirect && inst_pending && !inst_returned) begin
+                discard_pending <= 1'b1;
+            end
+        end
+    end
+
     // then we go into the instruction fetch pipe where stalling or flushing can occur
     if_id_pipline if_id_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
         
-        .if_pc(pc),
+        .if_pc(requested_pc),
         .if_inst(if_inst),
         .if_valid(if_valid),
 
@@ -353,7 +422,9 @@ module hart #(
         .id_valid(id_valid),
 
         .stall(stall_if_id),
-        .flush(clear_if_id)
+        .flush(clear_if_id),
+
+        .buffer_full(ifid_buffer_full)
     );
 
     // after first pipe, we decode to find out what the instruction is
@@ -480,7 +551,7 @@ module hart #(
         .ex_redirect(ex_redirect_raw)
     );
 
-    assign ex_redirect = ex_valid && ex_redirect_raw;
+    assign ex_redirect = ex_valid && ex_redirect_raw && !mem_wait;
 
     assign ex_regwrite =
         ex_valid &&
@@ -566,6 +637,65 @@ module hart #(
         .stall(stall_ex_mem)
     );
 
+    // checking any invalid instr or invalid mem access
+    assign mem_trap = mem_invalid_instruction || memory_misaligned;
+
+    assign mem_regwrite = mem_valid &&
+        !mem_trap &&
+        (mem_is_rtype ||
+        mem_is_itype ||
+        mem_is_load ||
+        mem_is_lui ||
+        mem_is_auipc ||
+        mem_is_jal ||
+        mem_is_jalr) &&
+        (mem_rd_addr != 5'd0);
+    // output data memory variables
+    assign o_dmem_addr = dmem_addr_wire;
+    assign o_dmem_wdata = dmem_wdata_wire;
+    assign o_dmem_mask = dmem_mask_wire;
+
+    // assert load and store when valid
+    assign dmem_load =
+        mem_valid &&
+        mem_is_load &&
+        !mem_trap;
+
+    assign dmem_store =
+        mem_valid &&
+        mem_is_store &&
+        !mem_trap;
+        
+    assign o_dmem_ren =
+        dmem_ren_wire &&
+        i_dmem_ready &&
+        !dmem_pending;
+
+    assign o_dmem_wen =
+        dmem_wen_wire &&
+        i_dmem_ready;
+
+    // check if mem access has been accepted
+    assign load_complete = dmem_pending && i_dmem_valid;
+    assign store_complete = o_dmem_wen;
+
+    assign mem_wait =
+        (dmem_load && !load_complete) ||
+        (dmem_store && !store_complete);
+
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            dmem_pending <= 1'b0;
+        end
+        else begin
+            if (o_dmem_ren)
+                dmem_pending <= 1'b1;
+
+            if (load_complete)
+                dmem_pending <= 1'b0;
+        end
+    end
+
     // this is where data memory is accessed and load data is generated. This is also where misaligned memory access is detected
     mem mem_inst (
         .i_dmem_rdata(i_dmem_rdata),
@@ -585,25 +715,6 @@ module hart #(
         .o_dmem_wen(dmem_wen_wire),
         .memory_misaligned(memory_misaligned)
     );
-    // checking any invalid instr or invalid mem access
-    assign mem_trap = mem_invalid_instruction || memory_misaligned;
-
-    assign mem_regwrite = mem_valid &&
-        !mem_trap &&
-        (mem_is_rtype ||
-        mem_is_itype ||
-        mem_is_load ||
-        mem_is_lui ||
-        mem_is_auipc ||
-        mem_is_jal ||
-        mem_is_jalr) &&
-        (mem_rd_addr != 5'd0);
-    // output data memory variables
-    assign o_dmem_addr = dmem_addr_wire;
-    assign o_dmem_ren = dmem_ren_wire;
-    assign o_dmem_wen = dmem_wen_wire;
-    assign o_dmem_wdata = dmem_wdata_wire;
-    assign o_dmem_mask = dmem_mask_wire;
     
     // after memory access, we enter final pipe into write back stage
     mem_wb_pipline mem_wb_inst (
@@ -628,8 +739,8 @@ module hart #(
         .is_jal(mem_is_jal),
         .is_jalr(mem_is_jalr),
         .is_load(mem_is_load),
-        .mem_regwrite(mem_regwrite),
-        .mem_valid(mem_valid),
+        .mem_regwrite(mem_regwrite && !mem_wait),
+        .mem_valid(mem_valid && !mem_wait),
         .mem_is_ebreak(mem_is_ebreak),
         .mem_trap(mem_trap),
         .mem_dmem_addr(dmem_addr_wire),
@@ -704,6 +815,7 @@ module hart #(
         .mem_is_store(mem_is_store),
         .ex_mem_flgs(ex_mem_flgs),
         .mem_rd_addr(mem_rd_addr),
+        .mem_wait(mem_wait),
 
         // from write back stage
         .wb_rs1_addr(wb_rs1_addr),
