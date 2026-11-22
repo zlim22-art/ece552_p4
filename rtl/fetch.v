@@ -10,7 +10,9 @@ module fetch #(
     output wire [31:0] pc_plus4
 );
 
-    pc pc_inst (
+    pc #(
+        .RESET_ADDR(RESET_ADDR)
+    ) pc_inst (
         .clk(clk),
         .rst_n(rst_n),
         .stall(stall),
