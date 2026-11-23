@@ -88,12 +88,155 @@ module cache (
     // arrays as you please.
 
     // Backing memory, modeled as two separate ways.
-    reg [   31:0] datas0 [DEPTH - 1:0][D - 1:0];
-    reg [   31:0] datas1 [DEPTH - 1:0][D - 1:0];
-    reg [T - 1:0] tags0  [DEPTH - 1:0];
-    reg [T - 1:0] tags1  [DEPTH - 1:0];
-    reg [1:0] valid [DEPTH - 1:0];
-    reg       lru   [DEPTH - 1:0];
+    reg [   31:0] datas0 [DEPTH - 1:0][D - 1:0]; // 4 words per line, 32 sets,  way 1
+    reg [   31:0] datas1 [DEPTH - 1:0][D - 1:0]; // 4 words per line, 32 sets, way 2
+    reg [T - 1:0] tags0  [DEPTH - 1:0]; // 23 bit tag, way 1
+    reg [T - 1:0] tags1  [DEPTH - 1:0]; // 23 bit tag, way 2
+    reg [1:0] valid [DEPTH - 1:0]; // 2 bit valid vector, one per way
+    //reg       lru   [DEPTH - 1:0]; // 1 bit LRU vector, one per set
+    reg       nru   [DEPTH - 1:0]; // 1 bit NMRU vector, one per set
+
+    genvar g_idx;
+    reg [2:0] cnt;
+    wire start_cnt;
+    reg [4:0] state, next_state;
+
+
+    localparam [4:0] 
+    IDLE           = 5'b00001, // IDLE (After Fetch)
+    LOAD_STORE_REQ = 5'b00010, // LOAD/STORE REQ
+    LOAD_CACHE     = 5'b00100, // LOAD CACHE (singular word)
+    LOAD_REG       = 5'b01000, // LOAD REG (with word from cache)
+    STORE_WORD     = 5'b10000; // STORE WORD IN CACHE, MEM
+
+
+    assign tag_in = i_req_addr[31:9];
+    assign set_in = i_req_addr[8:4];
+    assign offset_in = i_req_addr[3:2];
+
+
+    assign hit_way_0 = (valid[set_in][0] && (tags0[set_in] == tag_in)) ? 1'b0 : 1'b1;
+    assign hit_way_1 = (valid[set_in][1] && (tags1[set_in] == tag_in)) ? 1'b1 : 1'b0;
+    assign cnt_done = cnt[2];
+
+
+
+
+    generate
+        for (g_idx = 0; g_idx < DEPTH; g_idx = g_idx + 1) begin : gen_valid_zero
+            always @(posedge i_clk) begin
+                if (i_rst) begin
+                    valid[g_idx] <= 2'b00;
+                    nru[g_idx]   <= 1'b0;
+                end if (write_enable) begin
+                
+                end begin :
+
+            
+                end
+            end
+        end
+    endgenerate
+
+
+   
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            state <= IDLE;
+            cnt <= 0;
+        end else begin
+            state <= next_state;
+
+            if (start_cnt) begin
+                cnt <= 0;
+            end else if (state == LOAD_CACHE && inc_enable) begin
+                cnt <= cnt + 1;
+            end
+
+        end
+    end
+
+
+    always @(*) begin
+        next_state = state; // default hold
+        start_cnt = 1'b0;
+        o_res_rdata = 32'b0;
+        inc_enable = 1'b0;
+            case (state)
+                IDLE: begin
+                    if (i_req_ren || i_req_wen) begin
+                        next_state = LOAD_STORE_REQ;
+                    end
+                end
+
+                LOAD_STORE_REQ: begin
+                    if (i_dmem_ready) begin
+                        if (hit_way_0 || hit_way_1) begin
+                            next_state = LOAD_REG;
+                        end else begin
+                            next_state = LOAD_CACHE;
+                            start_cnt = 1'b1;
+
+                        end
+                    end
+                end
+
+                LOAD_CACHE: begin
+                    inc_enable = 1'b0;
+                    next_state = LOAD_CACHE;
+                    if (i_dmem_valid && cnt_done) begin
+                        if (i_req_ren) begin
+                            next_state = LOAD_REG;
+
+                        end else if (i_req_wen) begin
+                            next_state = STORE_WORD;
+                        end
+                    end 
+                    if i_dmem_valid begin
+                        inc_enable = 1'b1;
+
+                        if (nru[set_in] == 1'b0) begin
+                            tags0[set_in] = tag_in;
+                            data0[set_in][cnt] = i_dmem_rdata;
+                            valid[set_in][0] = 1'b1;
+                            nru[set_in] = 1'b1;
+                        end else begin
+                            tags1[set_in] = tag_in;
+                            valid[set_in][1] = 1'b1;
+                            nru[set_in] = 1'b0;
+                            data1[set_in][cnt] = i_dmem_rdata;
+                        end
+                    end
+                end
+
+                LOAD_REG: begin
+                    next_state = IDLE;
+                if (hit_way_0) begin
+                        o_res_rdata = datas0[set_in][offset_in];
+                    end else if (hit_way_1) begin
+                        o_res_rdata = datas1[set_in][offset_in];
+                    end
+                end
+
+                STORE_WORD: begin
+                    next_state = IDLE;
+                end
+
+                default: begin
+                    next_state = IDLE;
+                end
+        endcase
+end
+
+
+
+
+
+
+
+
+
+
 
     // Fill in your implementation here.
 endmodule
