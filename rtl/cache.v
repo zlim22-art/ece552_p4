@@ -88,229 +88,257 @@ module cache (
     // arrays as you please.
 
     // Backing memory, modeled as two separate ways.
-    reg [   31:0] datas0 [DEPTH - 1:0][D - 1:0]; // 4 words per line, 32 sets,  way 1
-    reg [   31:0] datas1 [DEPTH - 1:0][D - 1:0]; // 4 words per line, 32 sets, way 2
-    reg [T - 1:0] tags0  [DEPTH - 1:0]; // 23 bit tag, way 1
-    reg [T - 1:0] tags1  [DEPTH - 1:0]; // 23 bit tag, way 2
-    reg [1:0] valid [DEPTH - 1:0]; // 2 bit valid vector, one per way
-    //reg       lru   [DEPTH - 1:0]; // 1 bit LRU vector, one per set
-    reg       nru   [DEPTH - 1:0]; // 1 bit NMRU vector, one per set
+    reg [   31:0] datas0 [DEPTH - 1:0][D - 1:0];
+    reg [   31:0] datas1 [DEPTH - 1:0][D - 1:0];
+    reg [T - 1:0] tags0  [DEPTH - 1:0];
+    reg [T - 1:0] tags1  [DEPTH - 1:0];
+    reg [1:0] valid [DEPTH - 1:0];
 
-    genvar g_idx;
-    reg [2:0] cnt;
-    wire start_cnt;
-    reg [4:0] state, next_state;
+    // Fill in your implementation here.
+    reg nru [DEPTH - 1:0];
 
-    wire [T - 1:0] tag_in;
-    wire [S - 1:0] set_in;
-    wire [1:0]     offset_in;
-
-    wire           hit_way_0;
-    wire           hit_way_1;
-    wire           cnt_done;
-    wire [31:0]    old_word;
-
-    reg            start_cnt;
-    reg            inc_enable;
-    reg            write_enable_to_cache;
-    reg            read_enable;
-    reg  [31:0]    next_data_0;
-    reg  [31:0]    next_data_1;
-
-    localparam [4:0] 
-    IDLE           = 5'b00001, // IDLE (After Fetch)
-    LOAD_STORE_REQ = 5'b00010, // LOAD/STORE REQ
-    LOAD_CACHE     = 5'b00100, // LOAD CACHE (singular word)
-    LOAD_REG       = 5'b01000, // LOAD REG (with word from cache)
-    STORE_WORD     = 5'b10000; // STORE WORD IN CACHE, MEM
-
+    wire [T-1:0] tag_in;
+    wire [S-1:0] set_in;
+    wire [1:0] offset_in;
+    wire hit_way_0, hit_way_1, cache_hit, selected_way;
+    wire [31:0] cached_word;
+    wire req_active;
 
     assign tag_in = i_req_addr[31:9];
     assign set_in = i_req_addr[8:4];
     assign offset_in = i_req_addr[3:2];
+    assign hit_way_0 = valid[set_in][0] && (tags0[set_in] == tag_in);
+    assign hit_way_1 = valid[set_in][1] && (tags1[set_in] == tag_in);
+    assign cache_hit = hit_way_0 || hit_way_1;
+    assign cached_word = hit_way_0 ? datas0[set_in][offset_in] :
+                         hit_way_1 ? datas1[set_in][offset_in] : 32'b0;
+    assign selected_way = !valid[set_in][0] ? 1'b0 :
+                          !valid[set_in][1] ? 1'b1 : nru[set_in];
+    assign req_active = i_req_ren || i_req_wen;
 
-    assign replace_way = i_req_addr[9];
+    localparam [1:0]
+        LOAD_STORE_REQ = 2'd0,
+        LOAD_CACHE     = 2'd1,
+        LOAD_REG       = 2'd2,
+        STORE_WORD     = 2'd3;
 
-    assign hit_way_0 = (valid[set_in][0] && (tags0[set_in] == tag_in)) ? 1'b1 : 1'b0;
-    assign hit_way_1 = (valid[set_in][1] && (tags1[set_in] == tag_in)) ? 1'b1 : 1'b0;
+    reg [1:0] state;
+    reg [31:0] miss_addr;
+    reg [S-1:0] miss_set;
+    reg [T-1:0] miss_tag;
+    reg [1:0] miss_word;
+    reg miss_way;
+    reg miss_write;
+    reg [3:0] miss_mask;
+    reg [31:0] miss_wdata;
+    reg [1:0] cnt;
+    reg [2:0] issued;
+    wire refill_send, refill_receive;
+    wire available, hit_store, hit_accept;
+    wire [31:0] hit_mask, hit_merged;
+    reg [1:0] pending_cnt;
+    reg [31:0] pending_addr [0:1];
+    reg [31:0] pending_data [0:1];
+    wire pending_send, hit_direct, hit_buffer;
+    wire store_send;
 
-    assign cnt_done = cnt[2];
-    wire miss = ~(hit_way_0 || hit_way_1);
-    wire hit = hit_way_0 || hit_way_1;
+    assign available = (state == LOAD_STORE_REQ) || (state == LOAD_REG);
+    assign hit_store = available && i_req_wen && cache_hit;
+    assign pending_send = (pending_cnt != 2'd0) && i_mem_ready && !i_rst;
+    assign hit_accept = hit_store && ((pending_cnt != 2'd2) || pending_send);
+    assign hit_direct = hit_accept && (pending_cnt == 2'd0) && i_mem_ready;
+    assign hit_buffer = hit_accept && !hit_direct;
+    assign store_send = (state == STORE_WORD) && i_mem_ready && (pending_cnt == 2'd0);
+    assign hit_mask = {{8{i_req_mask[3]}}, {8{i_req_mask[2]}},
+                       {8{i_req_mask[1]}}, {8{i_req_mask[0]}}};
+    assign hit_merged = (cached_word & ~hit_mask) | (i_req_wdata & hit_mask);
 
-    wire [31:0] masked_data = {
-            i_req_mask[3] ? i_req_wdata[31:24] : old_word[31:24],
-            i_req_mask[2] ? i_req_wdata[23:16] : old_word[23:16],
-            i_req_mask[1] ? i_req_wdata[15:8]  : old_word[15:8],
-            i_req_mask[0] ? i_req_wdata[7:0]   : old_word[7:0]
-    };
+    assign refill_send = (state == LOAD_CACHE) && (issued < 3'd4) && i_mem_ready && (pending_cnt == 2'd0);
+    assign refill_receive = (state == LOAD_CACHE) && i_mem_valid &&
+                            ((issued > {1'b0, cnt}) || refill_send);
 
-   generate
-        for (g_idx = 0; g_idx < DEPTH; g_idx = g_idx + 1) begin : gen_valid_zero
+    wire [31:0] stored_word;
+    wire [31:0] byte_mask;
+    wire [31:0] masked_word;
+
+    always @(posedge i_clk) begin
+        pending_cnt <= i_rst ? 2'd0 :
+                    (hit_buffer && !pending_send) ? pending_cnt + 2'd1 :
+                    (!hit_buffer && pending_send) ? pending_cnt - 2'd1 :
+                    pending_cnt;
+
+        // Pending entry 0
+        pending_addr[0] <=
+            (hit_buffer && (pending_cnt == 2'd0)) ? i_req_addr :
+            (hit_buffer && pending_send && (pending_cnt == 2'd1)) ? i_req_addr :
+            pending_send ? pending_addr[1] :
+            pending_addr[0];
+
+        pending_data[0] <=
+            (hit_buffer && (pending_cnt == 2'd0)) ? hit_merged :
+            (hit_buffer && pending_send && (pending_cnt == 2'd1)) ? hit_merged :
+            pending_send ? pending_data[1] :
+            pending_data[0];
+
+        // Pending entry 1
+        pending_addr[1] <=
+            (hit_buffer && !pending_send && (pending_cnt == 2'd1)) ? i_req_addr :
+            (hit_buffer && pending_send && (pending_cnt == 2'd2)) ? i_req_addr :
+            pending_addr[1];
+
+        pending_data[1] <=
+            (hit_buffer && !pending_send && (pending_cnt == 2'd1)) ? hit_merged :
+            (hit_buffer && pending_send && (pending_cnt == 2'd2)) ? hit_merged :
+            pending_data[1];
+    end
+
+    assign stored_word = miss_way ? datas1[miss_set][miss_word] :
+                                    datas0[miss_set][miss_word];
+    assign byte_mask = {{8{miss_mask[3]}}, {8{miss_mask[2]}},
+                        {8{miss_mask[1]}}, {8{miss_mask[0]}}};
+    assign merged_word = (stored_word & ~byte_mask) |
+                         (miss_wdata & byte_mask);
+
+    // Read hits have combinational data. After a miss, CPU holds address
+    // stable, and the filled line is visible in LOAD_REG.
+    assign o_res_rdata = cached_word;
+
+    // Stall on misses or a store hit that cannot be accepted by memory.
+    assign o_busy = (state != LOAD_STORE_REQ && state != LOAD_REG) ||
+                    (available && req_active &&
+                     (!cache_hit || (i_req_wen && !hit_accept)));
+
+    // Each refill transaction reads one aligned 32-bit word.
+    assign o_mem_addr = pending_send ? pending_addr[0] :
+                        hit_direct ? i_req_addr :
+                        (state == LOAD_CACHE) ?
+                        {miss_addr[31:4], issued[1:0], 2'b00} : miss_addr;
+    assign o_mem_ren = !i_rst && refill_send;
+    assign o_mem_wen = !i_rst && (pending_send || hit_direct || store_send);
+    assign o_mem_wdata = pending_send ? pending_data[0] :
+                         hit_direct ? hit_merged : masked_word;
+
+    // Each set owns its valid and replacement registers.
+    genvar g;
+    generate
+        for (g = 0; g < DEPTH; g = g + 1) begin : gen_metadata
             always @(posedge i_clk) begin
                 if (i_rst) begin
-                    valid[g_idx] <= 2'b00;
-                    nru[g_idx]   <= 1'b0;
-                end else if (write_enable_to_cache && (g_idx == set_in)) begin
-                    datas0[g_idx][target_word] <= next_data_0;
-                    datas1[g_idx][target_word] <= next_data_1;
-                    tags0[g_idx]               <= next_tag_0;
-                    tags1[g_idx]               <= next_tag_1;
-                    valid[g_idx]               <= next_valid;
-                    nru[g_idx]                 <= next_nru;
-                end else if (LOAD_REG && (g_idx == set_in)) begin
-                    nru[g_idx]                 <= next_nru;
+                    valid[g] <= 2'b00;
+                    nru[g] <= 1'b0;
+                end else begin
+                    if (available && ((i_req_ren && cache_hit) || hit_accept) &&
+                        (set_in == g)) begin
+                        nru[g] <= hit_way_0 ? 1'b1 : 1'b0;
+                    end else if (refill_receive &&
+                                 (cnt == 2'd3) && (miss_set == g)) begin
+                        if (miss_way)
+                            valid[g][1] <= 1'b1;
+                        else
+                            valid[g][0] <= 1'b1;
+                        nru[g] <= !miss_way;
+                    end else if (store_send && (miss_set == g)) begin
+                        nru[g] <= !miss_way;
+                    end
                 end
             end
         end
     endgenerate
 
-
-   
     always @(posedge i_clk) begin
         if (i_rst) begin
-            state <= IDLE;
-            cnt <= 0;
-        end else if (state == LOAD_CACHE) begin
-            state <= next_state;
-            if (inc_enable) begin
-                cnt <= cnt + 1'b1;
-            // req_pending <= 1'b0;
-            end 
+            state <= LOAD_STORE_REQ;
+            cnt <= 2'b0;
+            issued <= 3'b0;
+            miss_addr <= 32'b0;
+            miss_set <= {S{1'b0}};
+            miss_tag <= {T{1'b0}};
+            miss_word <= 2'b0;
+            miss_way <= 1'b0;
+            miss_write <= 1'b0;
+            miss_mask <= 4'b0;
+            miss_wdata <= 32'b0;
         end else begin
-            state <= next_state;
-            cnt   <= 3'd0;
-        end
-    end
-
-
-    always @(*) begin
-        
-        next_state   = state;
-        inc_enable   = 1'b0;
-        latch_miss   = 1'b0;
-        write_enable_to_cache = 1'b0;
-        target_word  = offset_in;
-
-        next_data_0  = datas0[set_in][offset_in];
-        next_data_1  = datas1[set_in][offset_in];
-        next_tag_0   = tags0[set_in];
-        next_tag_1   = tags1[set_in];
-        next_valid   = valid[set_in];
-        next_nru     = nru[set_in];
-
-        o_busy       = 1'b0;
-        o_res_rdata  = 32'b0;
-        o_mem_addr   = 32'b0;
-        o_mem_ren    = 1'b0;
-        o_mem_wen    = 1'b0;
-        o_mem_wdata  = 32'b0;
             case (state)
-                IDLE: begin
-                    if ((i_req_ren || i_req_wen) && i_dmem_ready) begin 
-                        next_state = IDLE;
-                        if (hit && i_req_ren) begin
-                            o_busy       = 1'b0;
-                            o_res_rdata  = hit_way_0 ? datas0[set_in][offset_in] : datas1[set_in][offset_in];
-                            write_enable = 1'b1;
-                            next_nru     = hit_way_0 ? 1'b1 : 1'b0;
-                        end else if (hit && i_req_wen) begin
-                                next_state = STORE_WORD;
-                        end else if (miss) begin
-                            next_state = LOAD_CACHE;
-                            o_busy = 1'b1;
-                        end 
-
-                    end 
-                end
-
-                    // LOAD_STORE_REQ: begin
-                    //     if (i_dmem_ready) begin
-                    //         if (hit) begin
-                    //             if (i_req_ren) begin
-                    //                 next_state = LOAD_REG;
-                    //             end else if (i_req_wen) begin
-                    //                 next_state = STORE_WORD;
-                    //             end
-                    //         end else begin
-                    //             o_busy = 1'b1;
-                    //             next_state = LOAD_CACHE;
-                    //             start_cnt = 1'b1;
-
-                    //         end
-                    //     end
-                    // end
-
-                LOAD_CACHE: begin
-                    o_busy = 1'b1;
-                    inc_enable = 1'b0;
-                    next_state = LOAD_CACHE;
-                    o_mem_ren   = 1'b1;
-                    o_mem_addr  = {tag_in, set_in, cnt[1:0], 2'b00};
-                    if (i_mem_valid) begin
-                        inc_enable   = 1'b1;
-                        write_enable_to_cache = 1'b1;
-                        if (replace_way == 1'b0) begin
-                            next_data_0   = i_mem_rdata;
-                            next_tag_0    = tag_in;
-                            next_valid[0] = cnt_done ? 1'b1 : 1'b0;
-                            next_nru      = cnt_done ? 1'b1 : nru[set_in];
+                LOAD_STORE_REQ, LOAD_REG: begin
+                    state <= LOAD_STORE_REQ;
+                    if (req_active) begin
+                        if (cache_hit && i_req_ren) begin
+                            // Serve load hit combinationally and mark MRU.
+                            // Metadata updated by gen_metadata.
+                        end else if (hit_accept) begin
+                            if (hit_way_1)
+                                datas1[set_in][offset_in] <= hit_merged;
+                            else
+                                datas0[set_in][offset_in] <= hit_merged;
                         end else begin
-                            next_data_1   = i_mem_rdata;
-                            next_tag_1    = tag_in;
-                            next_valid[1] = cnt_done ? 1'b1 : 1'b0;
-                            next_nru      = cnt_done ? 1'b0 : nru[set_in];
-                        end
-
-                        if (cnt_done) begin
-                            if (i_req_ren) begin
-                                next_state = LOAD_REG;
-                            end else if (i_req_wen) begin
-                                next_state = STORE_WORD;
+                            // Capture every CPU request field because the
+                            // CPU drops ren/wen while stalled.
+                            miss_addr <= i_req_addr;
+                            miss_set <= set_in;
+                            miss_tag <= tag_in;
+                            miss_word <= offset_in;
+                            miss_write <= i_req_wen;
+                            miss_mask <= i_req_mask;
+                            miss_wdata <= i_req_wdata;
+                            if (cache_hit) begin
+                                // Store hit: no refill, use matching way.
+                                miss_way <= hit_way_1;
+                                state <= STORE_WORD;
+                            end else begin
+                                // Miss: choose an invalid way first.
+                                miss_way <= selected_way;
+                                cnt <= 2'b0;
+                                issued <= 3'b0;
+                                state <= LOAD_CACHE;
                             end
                         end
                     end
-
                 end
 
-                LOAD_REG: begin
-                   o_busy      = 1'b0;
-                   next_state  = IDLE;
-                   o_res_rdata = hit_way_0 ? datas0[set_in][offset_in] : datas1[set_in][offset_in];
-                   next_nru    = hit_way_0 ? 1'b1 : 1'b0;
-                   
+                LOAD_CACHE: begin
+                    // Issue and receive independently; memory returns in order.
+                    if (refill_send)
+                        issued <= issued + 3'd1;
+                    if (refill_receive) begin
+                        if (miss_way)
+                            datas1[miss_set][cnt] <= i_mem_rdata;
+                        else
+                            datas0[miss_set][cnt] <= i_mem_rdata;
+
+                        if (cnt == 2'd3) begin
+                            // Only mark a line valid after all four words.
+                            if (miss_way) begin
+                                tags1[miss_set] <= miss_tag;
+                            end else begin
+                                tags0[miss_set] <= miss_tag;
+                            end
+                            if (miss_write)
+                                state <= STORE_WORD;
+                            else
+                                state <= LOAD_REG;
+                        end else begin
+                            cnt <= cnt + 2'd1;
+                        end
+                    end
                 end
 
                 STORE_WORD: begin
-               
-                    next_data_0 = hit_way_0 ? masked_data : datas0[set_in][offset_in];
-                    next_data_1 = hit_way_1 ? masked_data : datas1[set_in][offset_in];
-                    next_nru    = hit_way_0 ? 1'b1 : 1'b0;
-
-                    o_busy      = 1'b1;
-                    o_mem_wen   = 1'b1;
-                    o_mem_addr  = i_req_addr;
-                    o_mem_wdata = masked_data;
-
-
-
-                    if (i_mem_ready) begin
-                        next_state = IDLE;
-                        o_mem_wen   = 1'b0;
-                        o_busy      = 1'b0;
-
+                    // Apply the masked word on the same edge that backing
+                    // memory accepts the write.
+                    if (store_send) begin
+                        if (miss_way)
+                            datas1[miss_set][miss_word] <= masked_word;
+                        else
+                            datas0[miss_set][miss_word] <= masked_word;
+                        state <= LOAD_REG;
                     end
-                    
                 end
 
-                default: begin
-                    next_state = IDLE;
-                end
-        endcase
-end
-
-
-    // Fill in your implementation here.
+                default: state <= LOAD_STORE_REQ;
+            endcase
+        end
+    end
 endmodule
 
 `default_nettype wire
