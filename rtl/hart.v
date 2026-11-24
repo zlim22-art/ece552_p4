@@ -844,6 +844,45 @@ module hart #(
         .mem_ex_forwarding_rs2(mem_ex_forwarding_rs2)
     );
 
+    //Instantiating data cache
+    cache cache_data (
+        .i_clk(i_clk),
+        .i_rst(i_rst),
+        .i_mem_ready(i_dmem_ready),
+        .o_mem_addr(wb_dmem_addr),
+        .o_mem_ren(wb_dmem_ren),
+        .o_mem_wen(),
+        .o_mem_wdata(),
+        .i_mem_rdata(wb_dmem_rdata),
+        .i_mem_valid(i_dmem_valid),
+        .o_busy(mem_wait),
+        .i_req_addr(wb_dmem_addr),
+        .i_req_ren(wb_dmem_ren),
+        .i_req_wen(),
+        .i_req_mask(wb_dmem_mask),
+        .i_req_wdata(),
+        .o_res_rdata(wb_dmem_rdata)
+    );
+
+    //Instantiating instruction cache
+    cache cache_inst (
+        .i_clk(i_clk),
+        .i_rst(i_rst),
+        .i_mem_ready(i_imem_ready),
+        .o_mem_addr(o_imem_raddr),
+        .o_mem_ren(o_imem_ren),
+        .o_mem_wen(),
+        .o_mem_wdata(),
+        .i_mem_rdata(i_imem_rdata),
+        .i_mem_valid(i_imem_valid),
+        .o_busy(),
+        .i_req_addr(pc),
+        .i_req_ren(o_imem_ren),
+        .i_req_wen(1'b0),
+        .i_req_mask(4'b0000),
+        .i_req_wdata(32'd0),
+        .o_res_rdata(if_inst)
+    );
     assign wb_rd_data =
         wb_is_lui ? wb_imm :
         (wb_is_jal || wb_is_jalr) ?
