@@ -95,17 +95,17 @@ module cache (
     reg [1:0] valid [DEPTH - 1:0]; // 2 bit valid vector, one per way
     //reg       lru   [DEPTH - 1:0]; // 1 bit LRU vector, one per set
     reg       nru   [DEPTH - 1:0]; // 1 bit NMRU vector, one per set
+    
     localparam [3:0]
         IDLE       = 4'b0001,
         LOAD_CACHE = 4'b0010,
         LOAD_REG   = 4'b0100,
         STORE_WORD = 4'b1000;
 
-    reg [ 3:0] state, next_state;
-    reg [ 1:0] cnt;
-    reg [31:0] cur_addr, next_addr;
-    reg        req_sent;
-    reg        req_is_write;
+    reg [3:0] state, next_state;
+    reg [2:0] req_cnt;      // 0..4: counts read requests issued to memory
+    reg [1:0] resp_cnt;     // 0..3: counts returning words written to cache
+    reg       req_is_write;
 
     wire [T - 1:0] tag_in    = i_req_addr[31:9];
     wire [S - 1:0] set_in    = i_req_addr[8:4];
@@ -115,7 +115,8 @@ module cache (
     wire hit_way_1   = valid[set_in][1] && (tags1[set_in] == tag_in);
     wire hit         = hit_way_0 || hit_way_1;
     wire miss        = !hit;
-    wire cnt_done    = (cnt == 2'd3);
+    wire reqs_done   = req_cnt[2];          // 1 once all 4 read requests are sent
+    wire resp_done   = (resp_cnt == 2'd3);  // 1 when final (4th) word is arriving
     wire replace_way = !valid[set_in][0] ? 1'b0 :
                        !valid[set_in][1] ? 1'b1 : nru[set_in];
 
@@ -127,7 +128,8 @@ module cache (
         i_req_mask[0] ? i_req_wdata[7:0]   : old_word[7:0]
     };
 
-    reg           inc_enable;
+    reg           req_inc;
+    reg           resp_inc;
     reg           write_enable_to_cache;
     reg           update_nru_only;
     reg [    1:0] target_word;
@@ -158,6 +160,14 @@ module cache (
                 if (i_rst) begin
                     valid[g_idx] <= 2'b00;
                     nru[g_idx]   <= 1'b0;
+                    datas0[g_idx][0] <= 32'b0;
+                    datas0[g_idx][1] <= 32'b0;
+                    datas0[g_idx][2] <= 32'b0;
+                    datas0[g_idx][3] <= 32'b0;
+                    datas1[g_idx][0] <= 32'b0;
+                    datas1[g_idx][1] <= 32'b0;
+                    datas1[g_idx][2] <= 32'b0;
+                    datas1[g_idx][3] <= 32'b0;
                 end else if (write_enable_to_cache && (g_idx == set_in)) begin
                     datas0[g_idx][target_word] <= next_data_0;
                     datas1[g_idx][target_word] <= next_data_1;
@@ -175,45 +185,40 @@ module cache (
     always @(posedge i_clk) begin
         if (i_rst) begin
             state        <= IDLE;
-            cnt          <= 2'd0;
-            cur_addr     <= 32'b0;
-            req_sent     <= 1'b0;
+            req_cnt      <= 3'd0;
+            resp_cnt     <= 2'd0;
             req_is_write <= 1'b0;
         end else begin
-            state    <= next_state;
-            cur_addr <= next_addr;
+            state <= next_state;
 
             if ((state == IDLE) && (i_req_ren || i_req_wen) && miss) begin
                 req_is_write <= i_req_wen;
             end
 
             if (state == LOAD_CACHE) begin
-                if (i_mem_valid) begin
-                    req_sent <= 1'b0;
-                end else if (!req_sent && i_mem_ready) begin
-                    req_sent <= 1'b1;
+                if (req_inc) begin
+                    req_cnt <= req_cnt + 3'd1;
                 end
-
-                if (inc_enable) begin
-                    cnt <= cnt + 2'd1;
+                if (resp_inc) begin
+                    resp_cnt <= resp_cnt + 2'd1;
                 end
             end else begin
-                cnt      <= 2'd0;
-                req_sent <= 1'b0;
+                req_cnt  <= 3'd0;
+                resp_cnt <= 2'd0;
             end
         end
     end
 
-    always @(*) begin
+always @(*) begin
         next_state            = state;
-        next_addr             = cur_addr;
-        inc_enable            = 1'b0;
+        req_inc               = 1'b0;
+        resp_inc              = 1'b0;
         write_enable_to_cache = 1'b0;
         update_nru_only       = 1'b0;
 
-        // Use counter word index during cache fill, otherwise use requested offset
+        // Use response counter during cache fill, otherwise use requested offset
         case (state)
-            LOAD_CACHE: target_word = cnt;
+            LOAD_CACHE: target_word = resp_cnt;
             default:    target_word = offset_in;
         endcase
 
@@ -225,7 +230,7 @@ module cache (
         next_nru    = nru[set_in];
 
         busy_r      = 1'b0;
-        res_rdata_r = 32'b0;
+        res_rdata_r = hit_way_0 ? datas0[set_in][offset_in] : hit_way_1 ? datas1[set_in][offset_in] : 32'b0;
         mem_addr_r  = 32'b0;
         mem_ren_r   = 1'b0;
         mem_wen_r   = 1'b0;
@@ -251,16 +256,36 @@ module cache (
                     end
 
                     3'b011: begin
-                        // Write hit: stall CPU and move to write-through state
-                        busy_r     = 1'b1;
-                        next_state = STORE_WORD;
+                        // Write hit: write through immediately if memory is ready; otherwise stall into STORE_WORD
+                        if (i_mem_ready) begin
+                            busy_r                = 1'b0;
+                            mem_wen_r             = 1'b1;
+                            mem_addr_r            = i_req_addr;
+                            mem_wdata_r           = masked_data;
+                            write_enable_to_cache = 1'b1;
+                            next_state            = IDLE;
+                            case (hit_way_0)
+                                1'b1: begin
+                                    next_data_0 = masked_data;
+                                    next_data_1 = datas1[set_in][offset_in];
+                                    next_nru    = 1'b1;
+                                end
+                                default: begin
+                                    next_data_0 = datas0[set_in][offset_in];
+                                    next_data_1 = masked_data;
+                                    next_nru    = 1'b0;
+                                end
+                            endcase
+                        end else begin
+                            busy_r     = 1'b1;
+                            next_state = STORE_WORD;
+                        end
                     end
 
                     3'b100,
                     3'b010: begin
-                        // Read or write miss: stall CPU, set base line address, and start fill
+                        // Read or write miss: stall CPU and start pipelined line fill
                         busy_r     = 1'b1;
-                        next_addr  = {tag_in, set_in, 4'b0000};
                         next_state = LOAD_CACHE;
                     end
 
@@ -272,17 +297,28 @@ module cache (
 
             LOAD_CACHE: begin
                 busy_r     = 1'b1;
-                mem_addr_r = cur_addr;
-                mem_ren_r  = !req_sent;
+                mem_addr_r = {tag_in, set_in, req_cnt[1:0], 2'b00};
 
+                // Request side: issue up to 4 pipelined reads whenever memory is ready
+                case ({reqs_done, i_mem_ready})
+                    2'b01: begin
+                        mem_ren_r = 1'b1;
+                        req_inc   = 1'b1;
+                    end
+                    default: begin
+                        mem_ren_r = 1'b0;
+                        req_inc   = 1'b0;
+                    end
+                endcase
+
+                // Response side: write each returning word into the replacement way
                 case (i_mem_valid)
                     1'b1: begin
-                        inc_enable            = 1'b1;
-                        next_addr             = cur_addr + 32'd4;
+                        resp_inc              = 1'b1;
                         write_enable_to_cache = 1'b1;
 
                         // Write returning word into replacement way; set valid and NRU on final word
-                        case ({replace_way, cnt_done})
+                        case ({replace_way, resp_done})
                             2'b00: begin
                                 // Way 0, words 0..2
                                 next_data_0   = i_mem_rdata;
@@ -314,7 +350,7 @@ module cache (
                         endcase
 
                         // Once all 4 words are loaded, route to write-through or read-return
-                        case ({cnt_done, req_is_write})
+                        case ({resp_done, req_is_write})
                             2'b11:   next_state = STORE_WORD;
                             2'b10:   next_state = LOAD_REG;
                             default: next_state = LOAD_CACHE;
@@ -347,7 +383,7 @@ module cache (
 
             STORE_WORD: begin
                 busy_r      = !i_mem_ready;
-                mem_wen_r   = 1'b1;
+                mem_wen_r   = i_mem_ready;
                 mem_addr_r  = i_req_addr;
                 mem_wdata_r = masked_data;
 
@@ -381,8 +417,6 @@ module cache (
             end
         endcase
     end
-
     // Fill in your implementation here.
 endmodule
-
 `default_nettype wire
