@@ -243,6 +243,7 @@ module hart #(
 
     // memory 
     wire [31:0] load_data;
+    wire [31:0] dcache_rdata;
 
     wire [31:0] mem_pc;
     wire [31:0] mem_inst_word; 
@@ -323,97 +324,92 @@ module hart #(
     wire [31:0] forwarded_data;
 
     // multicycle memory control signals
-    reg inst_pending;
     reg discard_pending;
-    reg dmem_pending;
-    reg [31:0] requested_pc;
 
     // imem
-    wire req_inst;
-    wire inst_returned;
+    wire icache_busy;
+    wire icache_ren;
     wire ifid_buffer_full;
     wire fetch_accepted;
 
     // dmem
+    wire dcache_busy;
     wire dmem_load;
     wire dmem_store;
-    wire load_complete;
-    wire store_complete;
     wire mem_wait;
 
-    // first we fetch
+
+    reg        redirect_pending;
+    reg [31:0] redirect_pc;
+    reg        icache_miss_pending;
+
+    wire fetch_redirect        = !icache_busy && (ex_redirect || redirect_pending);
+    wire [31:0] fetch_next_pc  = redirect_pending ? redirect_pc : ex_next_pc;
+
     fetch #(
         .RESET_ADDR(RESET_ADDR)
     ) fetch_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
-        .stall(!fetch_accepted),
-        .redirect(ex_redirect),
-        .next_pc(ex_next_pc),
+        .stall(!fetch_accepted && !fetch_redirect),
+        .redirect(fetch_redirect),
+        .next_pc(fetch_next_pc),
         .current_pc(pc),
         .pc_plus4(pc_plus4)
     );
-    assign o_imem_raddr = pc;
-    assign if_inst = i_imem_rdata;
-    assign if_valid = !i_rst && 
-        inst_returned && 
-        !discard_pending && 
-        !ex_redirect;
 
-    // request for instruction from mem
-    assign o_imem_ren =
-        !i_rst &&
-        i_imem_ready &&
-        !inst_pending &&
-        !ifid_buffer_full &&
-        !ex_redirect &&
-        !discard_pending;
+    assign icache_ren     = !i_rst && !icache_miss_pending && !ifid_buffer_full && !freeze_pc && !ex_redirect && !redirect_pending;
+    assign if_valid       = !i_rst && !icache_busy && !ex_redirect && !redirect_pending && (icache_ren || icache_miss_pending);
+    assign fetch_accepted = if_valid && !ifid_buffer_full && !clear_if_id;
 
-    // inst accepted from mem
-    assign fetch_accepted =
-        if_valid &&
-        !ifid_buffer_full &&
-        !clear_if_id;
-
-    // request accepted when mem is ready to send inst
-    assign req_inst = o_imem_ren && i_imem_ready;
-
-    // recieved valid instruction
-    assign inst_returned = inst_pending && i_imem_valid;
-
-    // update pending or discard flags on each clock edge
     always @(posedge i_clk) begin
         if (i_rst) begin
-            inst_pending <= 1'b0;
-            discard_pending <= 1'b0;
-            requested_pc <= RESET_ADDR;
-        end
-        else begin
-            // waiting for valid inst to return
-            if (req_inst) begin
-                inst_pending <= 1'b1;
-                requested_pc <= pc;
-            end 
-
-            // valid inst recieved
-            if (inst_returned) begin
-                inst_pending <= 1'b0;
-                discard_pending <= 1'b0;
+            redirect_pending    <= 1'b0;
+            redirect_pc         <= RESET_ADDR;
+            icache_miss_pending <= 1'b0;
+        end else begin
+            if (ex_redirect && icache_busy) begin
+                redirect_pending <= 1'b1;
+                redirect_pc      <= ex_next_pc;
+            end else if (!icache_busy) begin
+                redirect_pending <= 1'b0;
             end
 
-            // discard the request for instruction if redirect
-            if (ex_redirect && inst_pending && !inst_returned) begin
-                discard_pending <= 1'b1;
+            if (icache_ren && icache_busy) begin
+                icache_miss_pending <= 1'b1;
+            end else if (!icache_busy) begin
+                icache_miss_pending <= 1'b0;
             end
         end
     end
+
+
+
+    cache cache_inst (
+        .i_clk(i_clk),
+        .i_rst(i_rst),
+        .i_mem_ready(i_imem_ready),
+        .o_mem_addr(o_imem_raddr),
+        .o_mem_ren(o_imem_ren),
+        .o_mem_wen(),
+        .o_mem_wdata(),
+        .i_mem_rdata(i_imem_rdata),
+        .i_mem_valid(i_imem_valid),
+        .o_busy(icache_busy),
+        .i_req_addr(pc),
+        .i_req_ren(icache_ren),
+        .i_req_wen(1'b0),
+        .i_req_mask(4'b1111),
+        .i_req_wdata(32'd0),
+        .o_res_rdata(if_inst)
+    );
 
     // then we go into the instruction fetch pipe where stalling or flushing can occur
     if_id_pipline if_id_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
         
-        .if_pc(requested_pc),
+        .if_pc(pc),
         .if_inst(if_inst),
         .if_valid(if_valid),
 
@@ -428,7 +424,6 @@ module hart #(
     );
 
     // after first pipe, we decode to find out what the instruction is
-
     decode decode_inst (
         .clk(i_clk),
         .rst_n(~i_rst),
@@ -460,6 +455,7 @@ module hart #(
         .rd_addr(id_rd_addr),
         .inst_vector(id_inst_vector)
     );
+
     // after decoding, we enter decode pipe where stalling or flushing can occur
     id_ex_pipeline id_ex_inst (
         .id_inst_vector(id_inst_vector),
@@ -650,55 +646,25 @@ module hart #(
         mem_is_jal ||
         mem_is_jalr) &&
         (mem_rd_addr != 5'd0);
-    // output data memory variables
-    assign o_dmem_addr = dmem_addr_wire;
-    assign o_dmem_wdata = dmem_wdata_wire;
-    assign o_dmem_mask = dmem_mask_wire;
 
     // assert load and store when valid
     assign dmem_load =
         mem_valid &&
         mem_is_load &&
-        !mem_trap;
+        !mem_trap &&
+        dmem_ren_wire;
 
     assign dmem_store =
         mem_valid &&
         mem_is_store &&
-        !mem_trap;
-        
-    assign o_dmem_ren =
-        dmem_ren_wire &&
-        i_dmem_ready &&
-        !dmem_pending;
+        !mem_trap &&
+        dmem_wen_wire;
 
-    assign o_dmem_wen =
-        dmem_wen_wire &&
-        i_dmem_ready;
+    assign mem_wait = dcache_busy;
+    assign o_dmem_mask = 4'b1111;
 
-    // check if mem access has been accepted
-    assign load_complete = dmem_pending && i_dmem_valid;
-    assign store_complete = o_dmem_wen;
-
-    assign mem_wait =
-        (dmem_load && !load_complete) ||
-        (dmem_store && !store_complete);
-
-    always @(posedge i_clk) begin
-        if (i_rst) begin
-            dmem_pending <= 1'b0;
-        end
-        else begin
-            if (o_dmem_ren)
-                dmem_pending <= 1'b1;
-
-            if (load_complete)
-                dmem_pending <= 1'b0;
-        end
-    end
-
-    // this is where data memory is accessed and load data is generated. This is also where misaligned memory access is detected
     mem mem_inst (
-        .i_dmem_rdata(i_dmem_rdata),
+        .i_dmem_rdata(dcache_rdata),
         .rs2_data(mem_rs2_data),
         .alu_result(mem_alu_result),
         .instruction(mem_inst_word),
@@ -716,7 +682,6 @@ module hart #(
         .memory_misaligned(memory_misaligned)
     );
     
-    // after memory access, we enter final pipe into write back stage
     mem_wb_pipline mem_wb_inst (
         .mem_inst_vector(mem_inst_vector),
         .clk(i_clk),
@@ -744,11 +709,11 @@ module hart #(
         .mem_is_ebreak(mem_is_ebreak),
         .mem_trap(mem_trap),
         .mem_dmem_addr(dmem_addr_wire),
-        .mem_dmem_ren(dmem_ren_wire),
-        .mem_dmem_wen(dmem_wen_wire),
+        .mem_dmem_ren(dmem_load),
+        .mem_dmem_wen(dmem_store),
         .mem_dmem_mask(dmem_mask_wire),
         .mem_dmem_wdata(dmem_wdata_wire),
-        .mem_dmem_rdata(i_dmem_rdata),
+        .mem_dmem_rdata(dcache_rdata),
 
         .wb_mem_pc(wb_mem_pc),
         .wb_pc_rslt(wb_pc_rslt),
@@ -844,45 +809,26 @@ module hart #(
         .mem_ex_forwarding_rs2(mem_ex_forwarding_rs2)
     );
 
-    //Instantiating data cache
     cache cache_data (
         .i_clk(i_clk),
         .i_rst(i_rst),
         .i_mem_ready(i_dmem_ready),
-        .o_mem_addr(wb_dmem_addr),
-        .o_mem_ren(wb_dmem_ren),
-        .o_mem_wen(),
-        .o_mem_wdata(),
-        .i_mem_rdata(wb_dmem_rdata),
+        .o_mem_addr(o_dmem_addr),
+        .o_mem_ren(o_dmem_ren),
+        .o_mem_wen(o_dmem_wen),
+        .o_mem_wdata(o_dmem_wdata),
+        .i_mem_rdata(i_dmem_rdata),
         .i_mem_valid(i_dmem_valid),
-        .o_busy(mem_wait),
-        .i_req_addr(wb_dmem_addr),
-        .i_req_ren(wb_dmem_ren),
-        .i_req_wen(),
-        .i_req_mask(wb_dmem_mask),
-        .i_req_wdata(),
-        .o_res_rdata(wb_dmem_rdata)
+        .o_busy(dcache_busy),
+        .i_req_addr(dmem_addr_wire),
+        .i_req_ren(dmem_load),
+        .i_req_wen(dmem_store),
+        .i_req_mask(dmem_mask_wire),
+        .i_req_wdata(dmem_wdata_wire),
+        .o_res_rdata(dcache_rdata)
     );
 
-    //Instantiating instruction cache
-    cache cache_inst (
-        .i_clk(i_clk),
-        .i_rst(i_rst),
-        .i_mem_ready(i_imem_ready),
-        .o_mem_addr(o_imem_raddr),
-        .o_mem_ren(o_imem_ren),
-        .o_mem_wen(),
-        .o_mem_wdata(),
-        .i_mem_rdata(i_imem_rdata),
-        .i_mem_valid(i_imem_valid),
-        .o_busy(),
-        .i_req_addr(pc),
-        .i_req_ren(o_imem_ren),
-        .i_req_wen(1'b0),
-        .i_req_mask(4'b0000),
-        .i_req_wdata(32'd0),
-        .o_res_rdata(if_inst)
-    );
+   
     assign wb_rd_data =
         wb_is_lui ? wb_imm :
         (wb_is_jal || wb_is_jalr) ?
@@ -924,7 +870,6 @@ module hart #(
     assign o_retire_dmem_mask  = (wb_valid && !wb_trap) ? wb_dmem_mask : 4'b0000;
     assign o_retire_dmem_wdata = wb_dmem_wdata;
     assign o_retire_dmem_rdata = wb_dmem_rdata;
-
 endmodule
 
 `default_nettype wire
