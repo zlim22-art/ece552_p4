@@ -154,6 +154,28 @@ module cache (
     assign o_res_rdata = res_rdata_r;
 
     genvar g_idx;
+
+    reg [15:0] pending_writes;
+
+    wire write_accepted = mem_wen_r && i_mem_ready;
+
+    wire write_response = i_mem_valid &&
+                        (pending_writes != 16'd0);
+
+    wire read_response = i_mem_valid &&
+                        !write_response;
+
+    always @(posedge i_clk) begin
+        if (i_rst) begin
+            pending_writes <= 16'd0;
+        end else begin
+            case ({write_accepted, write_response})
+                2'b10: pending_writes <= pending_writes + 16'd1;
+                2'b01: pending_writes <= pending_writes - 16'd1;
+                default: pending_writes <= pending_writes;
+            endcase
+        end
+    end
     generate
         for (g_idx = 0; g_idx < DEPTH; g_idx = g_idx + 1) begin : gen_valid_zero
             always @(posedge i_clk) begin
@@ -312,7 +334,7 @@ always @(*) begin
                 endcase
 
                 // Response side: write each returning word into the replacement way
-                case (i_mem_valid)
+                case (read_response)
                     1'b1: begin
                         resp_inc              = 1'b1;
                         write_enable_to_cache = 1'b1;
