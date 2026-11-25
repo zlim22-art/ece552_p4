@@ -106,6 +106,7 @@ module cache (
     reg [2:0] req_cnt;      // 0..4: counts read requests issued to memory
     reg [1:0] resp_cnt;     // 0..3: counts returning words written to cache
     reg       req_is_write;
+    reg       miss_way;
 
     wire [T - 1:0] tag_in    = i_req_addr[31:9];
     wire [S - 1:0] set_in    = i_req_addr[8:4];
@@ -128,6 +129,39 @@ module cache (
         i_req_mask[0] ? i_req_wdata[7:0]   : old_word[7:0]
     };
 
+    // Two pending writes; entry 0 is always the oldest.
+    reg [1:0] pending_cnt;
+    reg [31:0] pending_addr [0:1];
+    reg [31:0] pending_data [0:1];
+
+    wire available = (state == IDLE) || (state == LOAD_REG);
+    wire pending_send = !i_rst && (pending_cnt != 2'd0) && i_mem_ready;
+    wire hit_accept = !i_rst && available && i_req_wen && hit &&
+                      ((pending_cnt != 2'd2) || pending_send);
+    wire hit_direct = hit_accept && (pending_cnt == 2'd0) && i_mem_ready;
+    wire hit_buffer = hit_accept && !hit_direct;
+    wire store_send = !i_rst && (state == STORE_WORD) &&
+                      i_mem_ready && (pending_cnt == 2'd0);
+    wire write_pending_0 = hit_buffer &&
+                           ((pending_cnt == 2'd0) ||
+                            (pending_send && (pending_cnt == 2'd1)));
+    wire write_pending_1 = hit_buffer &&
+                           ((!pending_send && (pending_cnt == 2'd1)) ||
+                            (pending_send && (pending_cnt == 2'd2)));
+
+    always @(posedge i_clk) begin
+        pending_cnt <= i_rst ? 2'd0 :
+                       (hit_buffer && !pending_send) ? pending_cnt + 2'd1 :
+                       (!hit_buffer && pending_send) ? pending_cnt - 2'd1 :
+                       pending_cnt;
+        pending_addr[0] <= write_pending_0 ? i_req_addr :
+                           pending_send ? pending_addr[1] : pending_addr[0];
+        pending_data[0] <= write_pending_0 ? masked_data :
+                           pending_send ? pending_data[1] : pending_data[0];
+        pending_addr[1] <= write_pending_1 ? i_req_addr : pending_addr[1];
+        pending_data[1] <= write_pending_1 ? masked_data : pending_data[1];
+    end
+
     reg           req_inc;
     reg           resp_inc;
     reg           write_enable_to_cache;
@@ -146,36 +180,14 @@ module cache (
     reg        busy_r;
     reg [31:0] res_rdata_r;
 
-    assign o_mem_addr  = mem_addr_r;
-    assign o_mem_ren   = mem_ren_r;
-    assign o_mem_wen   = mem_wen_r;
-    assign o_mem_wdata = mem_wdata_r;
+    assign o_mem_addr  = pending_send ? pending_addr[0] : mem_addr_r;
+    assign o_mem_ren   = !i_rst && mem_ren_r;
+    assign o_mem_wen   = !i_rst && (pending_send || mem_wen_r);
+    assign o_mem_wdata = pending_send ? pending_data[0] : mem_wdata_r;
     assign o_busy      = busy_r;
     assign o_res_rdata = res_rdata_r;
 
     genvar g_idx;
-
-    reg [15:0] pending_writes;
-
-    wire write_accepted = mem_wen_r && i_mem_ready;
-
-    wire write_response = i_mem_valid &&
-                        (pending_writes != 16'd0);
-
-    wire read_response = i_mem_valid &&
-                        !write_response;
-
-    always @(posedge i_clk) begin
-        if (i_rst) begin
-            pending_writes <= 16'd0;
-        end else begin
-            case ({write_accepted, write_response})
-                2'b10: pending_writes <= pending_writes + 16'd1;
-                2'b01: pending_writes <= pending_writes - 16'd1;
-                default: pending_writes <= pending_writes;
-            endcase
-        end
-    end
     generate
         for (g_idx = 0; g_idx < DEPTH; g_idx = g_idx + 1) begin : gen_valid_zero
             always @(posedge i_clk) begin
@@ -210,11 +222,13 @@ module cache (
             req_cnt      <= 3'd0;
             resp_cnt     <= 2'd0;
             req_is_write <= 1'b0;
+            miss_way     <= 1'b0;
         end else begin
             state <= next_state;
 
-            if ((state == IDLE) && (i_req_ren || i_req_wen) && miss) begin
+            if (available && (i_req_ren || i_req_wen) && miss) begin
                 req_is_write <= i_req_wen;
+                miss_way <= replace_way;
             end
 
             if (state == LOAD_CACHE) begin
@@ -259,7 +273,8 @@ always @(*) begin
         mem_wdata_r = 32'b0;
 
         case (state)
-            IDLE: begin
+            IDLE, LOAD_REG: begin
+                next_state = IDLE;
                 case ({i_req_ren, i_req_wen, hit})
                     3'b101: begin
                         // Read hit: return data immediately and update NRU
@@ -278,30 +293,19 @@ always @(*) begin
                     end
 
                     3'b011: begin
-                        // Write hit: write through immediately if memory is ready; otherwise stall into STORE_WORD
-                        if (i_mem_ready) begin
-                            busy_r                = 1'b0;
-                            mem_wen_r             = 1'b1;
-                            mem_addr_r            = i_req_addr;
-                            mem_wdata_r           = masked_data;
-                            write_enable_to_cache = 1'b1;
-                            next_state            = IDLE;
-                            case (hit_way_0)
-                                1'b1: begin
-                                    next_data_0 = masked_data;
-                                    next_data_1 = datas1[set_in][offset_in];
-                                    next_nru    = 1'b1;
-                                end
-                                default: begin
-                                    next_data_0 = datas0[set_in][offset_in];
-                                    next_data_1 = masked_data;
-                                    next_nru    = 1'b0;
-                                end
-                            endcase
-                        end else begin
-                            busy_r     = 1'b1;
-                            next_state = STORE_WORD;
-                        end
+                        // Write hit: update cache now; send directly or buffer.
+                        busy_r                = !hit_accept;
+                        mem_wen_r             = hit_accept && hit_direct;
+                        mem_addr_r            = hit_accept ? i_req_addr : 32'b0;
+                        mem_wdata_r           = hit_accept ? masked_data : 32'b0;
+                        write_enable_to_cache = hit_accept;
+                        next_state            = hit_accept ? IDLE : STORE_WORD;
+                        next_data_0 = (hit_accept && hit_way_0) ?
+                                      masked_data : datas0[set_in][offset_in];
+                        next_data_1 = (hit_accept && !hit_way_0) ?
+                                      masked_data : datas1[set_in][offset_in];
+                        next_nru = hit_accept ?
+                                   (hit_way_0 ? 1'b1 : 1'b0) : nru[set_in];
                     end
 
                     3'b100,
@@ -322,7 +326,7 @@ always @(*) begin
                 mem_addr_r = {tag_in, set_in, req_cnt[1:0], 2'b00};
 
                 // Request side: issue up to 4 pipelined reads whenever memory is ready
-                case ({reqs_done, i_mem_ready})
+                case ({reqs_done, (i_mem_ready && (pending_cnt == 2'd0))})
                     2'b01: begin
                         mem_ren_r = 1'b1;
                         req_inc   = 1'b1;
@@ -334,13 +338,13 @@ always @(*) begin
                 endcase
 
                 // Response side: write each returning word into the replacement way
-                case (read_response)
+                case (i_mem_valid && ((req_cnt > {1'b0, resp_cnt}) || req_inc))
                     1'b1: begin
                         resp_inc              = 1'b1;
                         write_enable_to_cache = 1'b1;
 
                         // Write returning word into replacement way; set valid and NRU on final word
-                        case ({replace_way, resp_done})
+                        case ({miss_way, resp_done})
                             2'b00: begin
                                 // Way 0, words 0..2
                                 next_data_0   = i_mem_rdata;
@@ -385,35 +389,17 @@ always @(*) begin
                 endcase
             end
 
-            LOAD_REG: begin
-                busy_r          = 1'b0;
-                next_state      = IDLE;
-                update_nru_only = 1'b1;
-
-                // Return the newly loaded word from the hitting way and update NRU
-                case (hit_way_0)
-                    1'b1: begin
-                        res_rdata_r = datas0[set_in][offset_in];
-                        next_nru    = 1'b1;
-                    end
-                    default: begin
-                        res_rdata_r = datas1[set_in][offset_in];
-                        next_nru    = 1'b0;
-                    end
-                endcase
-            end
-
             STORE_WORD: begin
-                busy_r      = !i_mem_ready;
-                mem_wen_r   = i_mem_ready;
+                busy_r      = 1'b1;
+                mem_wen_r   = store_send;
                 mem_addr_r  = i_req_addr;
                 mem_wdata_r = masked_data;
 
-                case (i_mem_ready)
+                case (store_send)
                     1'b1: begin
-                        // Memory accepted write: update hitting way in cache and return to IDLE
+                        // Keep busy until the write is accepted at the clock edge.
                         write_enable_to_cache = 1'b1;
-                        next_state            = IDLE;
+                        next_state            = LOAD_REG;
                         case (hit_way_0)
                             1'b1: begin
                                 next_data_0 = masked_data;
