@@ -102,6 +102,12 @@ module cache (
         LOAD_REG   = 4'b0100,
         STORE_WORD = 4'b1000;
 
+    localparam [2:0]
+        REQ_READ_HIT   = 3'b101,
+        REQ_WRITE_HIT  = 3'b011,
+        REQ_READ_MISS  = 3'b100,
+        REQ_WRITE_MISS = 3'b010;
+
     reg [3:0] state, next_state;
     reg [2:0] req_cnt;      // 0..4: counts read requests issued to memory
     reg [1:0] resp_cnt;     // 0..3: counts returning words written to cache
@@ -122,6 +128,8 @@ module cache (
                        !valid[set_in][1] ? 1'b1 : nru[set_in];
 
     wire [31:0] old_word = hit_way_0 ? datas0[set_in][offset_in] : datas1[set_in][offset_in];
+
+
     wire [31:0] masked_data = {
         i_req_mask[3] ? i_req_wdata[31:24] : old_word[31:24],
         i_req_mask[2] ? i_req_wdata[23:16] : old_word[23:16],
@@ -188,33 +196,33 @@ module cache (
     assign o_res_rdata = res_rdata_r;
 
     genvar g_idx;
+    genvar w_inx;
+    // TODO this part fine:
     generate
         for (g_idx = 0; g_idx < DEPTH; g_idx = g_idx + 1) begin : gen_valid_zero
-            always @(posedge i_clk) begin
-                if (i_rst) begin
-                    valid[g_idx] <= 2'b00;
-                    nru[g_idx]   <= 1'b0;
-                    datas0[g_idx][0] <= 32'b0;
-                    datas0[g_idx][1] <= 32'b0;
-                    datas0[g_idx][2] <= 32'b0;
-                    datas0[g_idx][3] <= 32'b0;
-                    datas1[g_idx][0] <= 32'b0;
-                    datas1[g_idx][1] <= 32'b0;
-                    datas1[g_idx][2] <= 32'b0;
-                    datas1[g_idx][3] <= 32'b0;
-                end else if (write_enable_to_cache && (g_idx == set_in)) begin
-                    datas0[g_idx][target_word] <= next_data_0;
-                    datas1[g_idx][target_word] <= next_data_1;
-                    tags0[g_idx]               <= next_tag_0;
-                    tags1[g_idx]               <= next_tag_1;
-                    valid[g_idx]               <= next_valid;
-                    nru[g_idx]                 <= next_nru;
-                end else if (update_nru_only && (g_idx == set_in)) begin
-                    nru[g_idx]                 <= next_nru;
+            for (w_inx=0; w_inx < 4 ; w_inx=w_inx+1 ) begin : gen_word_zero
+                always @(posedge i_clk) begin
+                    if (i_rst) begin
+                        valid[g_idx] <= 2'b00;
+                        nru[g_idx]   <= 1'b0;
+                        datas0[g_idx][w_inx] <= 32'b0; 
+                        datas1[g_idx][w_inx] <= 32'b0;
+                    
+                    end else if (write_enable_to_cache && (g_idx == set_in)) begin
+                        datas0[g_idx][target_word] <= next_data_0;
+                        datas1[g_idx][target_word] <= next_data_1;
+                        tags0[g_idx]               <= next_tag_0;
+                        tags1[g_idx]               <= next_tag_1;
+                        valid[g_idx]               <= next_valid;
+                        nru[g_idx]                 <= next_nru;
+                    end else if (update_nru_only && (g_idx == set_in)) begin
+                        nru[g_idx]                 <= next_nru;
+                    end
                 end
             end
         end
     endgenerate
+    // TODO this part done end loop
 
     always @(posedge i_clk) begin
         if (i_rst) begin
@@ -231,33 +239,21 @@ module cache (
                 miss_way <= replace_way;
             end
 
-            if (state == LOAD_CACHE) begin
-                if (req_inc) begin
-                    req_cnt <= req_cnt + 3'd1;
-                end
-                if (resp_inc) begin
-                    resp_cnt <= resp_cnt + 2'd1;
-                end
-            end else begin
-                req_cnt  <= 3'd0;
-                resp_cnt <= 2'd0;
-            end
+            req_cnt  <= (state == LOAD_CACHE) ? (req_inc  ? (req_cnt  + 3'd1) : req_cnt)  : 3'd0;
+            resp_cnt <= (state == LOAD_CACHE) ? (resp_inc ? (resp_cnt + 2'd1) : resp_cnt) : 2'd0;
         end
     end
 
-always @(*) begin
+
+    
+    always @(*) begin
         next_state            = state;
         req_inc               = 1'b0;
         resp_inc              = 1'b0;
         write_enable_to_cache = 1'b0;
         update_nru_only       = 1'b0;
 
-        // Use response counter during cache fill, otherwise use requested offset
-        case (state)
-            LOAD_CACHE: target_word = resp_cnt;
-            default:    target_word = offset_in;
-        endcase
-
+        target_word = (state == LOAD_CACHE) ? resp_cnt : offset_in;
         next_data_0 = datas0[set_in][target_word];
         next_data_1 = datas1[set_in][target_word];
         next_tag_0  = tags0[set_in];
@@ -276,24 +272,16 @@ always @(*) begin
             IDLE, LOAD_REG: begin
                 next_state = IDLE;
                 case ({i_req_ren, i_req_wen, hit})
-                    3'b101: begin
-                        // Read hit: return data immediately and update NRU
+
+                    REQ_READ_HIT: begin
                         busy_r          = 1'b0;
                         update_nru_only = 1'b1;
-                        case (hit_way_0)
-                            1'b1: begin
-                                res_rdata_r = datas0[set_in][offset_in];
-                                next_nru    = 1'b1;
-                            end
-                            default: begin
-                                res_rdata_r = datas1[set_in][offset_in];
-                                next_nru    = 1'b0;
-                            end
-                        endcase
+                        res_rdata_r = hit_way_0 ? datas0[set_in][offset_in] : datas1[set_in][offset_in];
+                        next_nru    = hit_way_0 ? 1'b1 : 1'b0;
                     end
 
-                    3'b011: begin
-                        // Write hit: update cache now; send directly or buffer.
+                    REQ_WRITE_HIT: begin
+
                         busy_r                = !hit_accept;
                         mem_wen_r             = hit_accept && hit_direct;
                         mem_addr_r            = hit_accept ? i_req_addr : 32'b0;
@@ -308,9 +296,7 @@ always @(*) begin
                                    (hit_way_0 ? 1'b1 : 1'b0) : nru[set_in];
                     end
 
-                    3'b100,
-                    3'b010: begin
-                        // Read or write miss: stall CPU and start pipelined line fill
+                    REQ_READ_MISS,REQ_WRITE_MISS: begin
                         busy_r     = 1'b1;
                         next_state = LOAD_CACHE;
                     end
@@ -337,58 +323,40 @@ always @(*) begin
                     end
                 endcase
 
-                // Response side: write each returning word into the replacement way
-                case (i_mem_valid && ((req_cnt > {1'b0, resp_cnt}) || req_inc))
-                    1'b1: begin
-                        resp_inc              = 1'b1;
-                        write_enable_to_cache = 1'b1;
+              // Response side: write each returning word into the replacement way
+            case (i_mem_valid && ((req_cnt > {1'b0, resp_cnt}) || req_inc))
+                1'b1: begin
+                    resp_inc              = 1'b1;
+                    write_enable_to_cache = 1'b1;
 
-                        // Write returning word into replacement way; set valid and NRU on final word
-                        case ({miss_way, resp_done})
-                            2'b00: begin
-                                // Way 0, words 0..2
-                                next_data_0   = i_mem_rdata;
-                                next_tag_0    = tag_in;
-                                next_valid[0] = 1'b0;
-                                next_nru      = nru[set_in];
-                            end
-                            2'b01: begin
-                                // Way 0, final word (word 3)
-                                next_data_0   = i_mem_rdata;
-                                next_tag_0    = tag_in;
-                                next_valid[0] = 1'b1;
-                                next_nru      = 1'b1;
-                            end
-                            2'b10: begin
-                                // Way 1, words 0..2
-                                next_data_1   = i_mem_rdata;
-                                next_tag_1    = tag_in;
-                                next_valid[1] = 1'b0;
-                                next_nru      = nru[set_in];
-                            end
-                            default: begin
-                                // Way 1, final word (word 3)
-                                next_data_1   = i_mem_rdata;
-                                next_tag_1    = tag_in;
-                                next_valid[1] = 1'b1;
-                                next_nru      = 1'b0;
-                            end
-                        endcase
+                    next_data_0   = (miss_way == 1'b0) ? i_mem_rdata : datas0[set_in][target_word];
+                    next_data_1   = (miss_way != 1'b0) ? i_mem_rdata : datas1[set_in][target_word];
 
-                        // Once all 4 words are loaded, route to write-through or read-return
-                        case ({resp_done, req_is_write})
-                            2'b11:   next_state = STORE_WORD;
-                            2'b10:   next_state = LOAD_REG;
-                            default: next_state = LOAD_CACHE;
-                        endcase
-                    end
+                    next_tag_0    = (miss_way == 1'b0) ? tag_in : tags0[set_in];
+                    next_tag_1    = (miss_way != 1'b0) ? tag_in : tags1[set_in];
 
-                    default: begin
-                        // Wait for returning memory word
-                    end
+                    next_valid[0] = (miss_way == 1'b0) ? (resp_done ? 1'b1 : 1'b0) : valid[set_in][0];
+                    next_valid[1] = (miss_way != 1'b0) ? (resp_done ? 1'b1 : 1'b0) : valid[set_in][1];
+                    next_nru      = resp_done ? ((miss_way == 1'b0) ? 1'b1 : 1'b0) : nru[set_in];
+
+                    // Once all 4 words are loaded route to write or return value and return to idel
+                    
+                    // NOTE Chnaging this to return isnatnly on READ saves a lot of CPI 3%-6%
+                    busy_r      = !(resp_done && !req_is_write);
+                    res_rdata_r = (resp_done && !req_is_write)? ((offset_in == 2'd3) ?  i_mem_rdata 
+                        :(miss_way == 1'b0)  ? datas0[set_in][offset_in] :
+                        datas1[set_in][offset_in]): res_rdata_r;
+                    next_state  = resp_done ? (req_is_write ? STORE_WORD : IDLE) : LOAD_CACHE;
+                end
+
+                default: begin
+                    // Wait for returning memory word
+                end
                 endcase
             end
 
+
+            // RUNS POST MISS OR POST HIT
             STORE_WORD: begin
                 busy_r      = 1'b1;
                 mem_wen_r   = store_send;
@@ -399,19 +367,10 @@ always @(*) begin
                     1'b1: begin
                         // Keep busy until the write is accepted at the clock edge.
                         write_enable_to_cache = 1'b1;
-                        next_state            = LOAD_REG;
-                        case (hit_way_0)
-                            1'b1: begin
-                                next_data_0 = masked_data;
-                                next_data_1 = datas1[set_in][offset_in];
-                                next_nru    = 1'b1;
-                            end
-                            default: begin
-                                next_data_0 = datas0[set_in][offset_in];
-                                next_data_1 = masked_data;
-                                next_nru    = 1'b0;
-                            end
-                        endcase
+                        next_state            = IDLE;
+                        next_data_0 = hit_way_0 ? masked_data : datas0[set_in][offset_in];
+                        next_data_1 = hit_way_0 ? datas1[set_in][offset_in] : masked_data;
+                        next_nru    = hit_way_0 ? 1'b1 : 1'b0;
                     end
 
                     default: begin
